@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-26",
+  "description": "展锐 Android10 NV Checklist 默认检查项（云端默认配置，仅维护者可改）",
+  "defaults": {
+    "edch_Category": 7,
+    "cap_log_enable": 0,
+    "dsp_log_set": 0,
+    "gea_encryption_algo1": 0,
+    "gea_algo2": 0,
+    "sim_hot_plug_cfg": 0
+  },
+  "nvm_files": {
+    "edch_Category": "td_nv_type.nvm",
+    "gea_encryption_algo1": "td_nv_type.nvm",
+    "gea_algo2": "td_nv_type.nvm",
+    "dsp_log_set": "nv_type_4band.nvm",
+    "cap_log_enable": "nv_type_4band.nvm",
+    "sim_hot_plug_cfg": "ProductionParam.nvm"
+  },
+  "check_items": [
+    "edch_Category",
+    "cap_log_enable",
+    "dsp_log_set",
+    "gea_encryption_algo1",
+    "gea_algo2",
+    "sim_hot_plug_cfg"
+  ],
+  "serial": {
+    "port_keyword": "SPRD LTE AT(WIQ)",
+    "baudrate": 115200,
+    "at_command": "AT+QFSGVERSION?",
+    "response_timeout_ms": 2000
+  }
+}

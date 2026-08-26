@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NvCheckList - 展锐 NV 检查工具</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-icon">✓</div>
+        <div class="logo-text">
+          <div class="logo-title">NvCheckList</div>
+          <div class="logo-subtitle">展锐 NV 检查工具</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a class="nav-item active" data-page="check">
+          <span class="nav-icon">▶</span> 一键检查
+        </a>
+        <a class="nav-item" data-page="history">
+          <span class="nav-icon">≡</span> 历史记录
+        </a>
+        <a class="nav-item" data-page="config">
+          <span class="nav-icon">⚙</span> 配置管理
+        </a>
+        <a class="nav-item" data-page="export">
+          <span class="nav-icon">↓</span> 批量导出
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="version-info">v2.0 Web</div>
+      </div>
+    </aside>
+
+    <!-- 主内容 -->
+    <main class="main">
+      <!-- 一键检查页面 -->
+      <section class="page active" id="page-check">
+        <h1 class="page-title">一键检查</h1>
+
+        <div class="card status-card">
+          <div class="status-grid">
+            <div class="status-item" id="status-port">
+              <div class="status-label">串口状态</div>
+              <div class="status-value disconnected"><span class="dot"></span>未连接</div>
+              <button class="btn btn-sm" id="btn-connect-port">连接串口</button>
+            </div>
+            <div class="status-item" id="status-folder">
+              <div class="status-label">项目文件夹</div>
+              <div class="status-value disconnected"><span class="dot"></span>未选择</div>
+              <button class="btn btn-sm" id="btn-select-folder">选择文件夹</button>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-run-check" disabled>开始检查</button>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">检查日志</h2>
+          <div class="log-panel" id="log-panel">
+            <div class="log-line log-info">等待开始检查 ...</div>
+          </div>
+        </div>
+
+        <div class="card" id="result-card" style="display:none">
+          <h2 class="card-title">检查结果 <span class="badge" id="result-badge">--</span></h2>
+          <div class="result-meta">
+            <div class="meta-item"><span class="meta-label">模块型号</span><span id="result-module" class="meta-value">--</span></div>
+            <div class="meta-item"><span class="meta-label">检查时间</span><span id="result-time" class="meta-value">--</span></div>
+          </div>
+          <div class="result-items" id="result-items"></div>
+          <div class="result-at" id="result-at-box" style="display:none">
+            <div class="meta-label">AT+QFSGVERSION?</div>
+            <pre class="at-content" id="result-at"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 历史记录页面 -->
+      <section class="page" id="page-history">
+        <h1 class="page-title">历史记录</h1>
+
+        <div class="card">
+          <div class="filter-bar">
+            <input type="text" class="input" id="filter-module" placeholder="按模块型号搜索...">
+            <select class="select" id="filter-result">
+              <option value="">全部结果</option>
+              <option value="pass">全部 pass</option>
+              <option value="fail">存在 fail</option>
+            </select>
+            <input type="date" class="input" id="filter-date-from">
+            <span style="color:#999">~</span>
+            <input type="date" class="input" id="filter-date-to">
+            <button class="btn" id="btn-filter-apply">筛选</button>
+            <button class="btn btn-ghost" id="btn-filter-reset">重置</button>
+            <div style="flex:1"></div>
+            <button class="btn btn-danger" id="btn-delete-selected" disabled>删除选中</button>
+            <button class="btn btn-primary" id="btn-export-selected" disabled>导出选中为 Excel</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="history-table">
+              <thead>
+                <tr>
+                  <th style="width:40px"><input type="checkbox" id="chk-select-all"></th>
+                  <th>模块型号</th>
+                  <th>结果</th>
+                  <th>fail信息</th>
+                  <th>检查时间</th>
+                  <th style="width:80px">操作</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="history-pagination"></div>
+        </div>
+      </section>
+
+      <!-- 配置管理页面 -->
+      <section class="page" id="page-config">
+        <h1 class="page-title">配置管理</h1>
+
+        <div class="card">
+          <div class="config-source-bar">
+            <div>
+              <span class="config-status" id="config-source-label">加载中...</span>
+            </div>
+            <div>
+              <button class="btn" id="btn-refresh-default">拉取云端默认</button>
+              <button class="btn btn-danger" id="btn-reset-default">恢复云端默认</button>
+            </div>
+          </div>
+          <p class="config-hint">
+            云端默认配置由管理员维护。您在本地修改的配置仅保存在当前浏览器，不会影响云端。点击"恢复云端默认"将清除本地覆盖。
+          </p>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">串口配置</h2>
+          <div class="form-grid">
+            <div class="form-item">
+              <label>AT 串口关键字</label>
+              <input type="text" class="input" id="cfg-port-keyword">
+            </div>
+            <div class="form-item">
+              <label>波特率</label>
+              <input type="number" class="input" id="cfg-baudrate">
+            </div>
+            <div class="form-item">
+              <label>AT 命令</label>
+              <input type="text" class="input" id="cfg-at-command">
+            </div>
+            <div class="form-item">
+              <label>响应超时(ms)</label>
+              <input type="number" class="input" id="cfg-timeout">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">检查项 <button class="btn btn-sm btn-primary" id="btn-add-item" style="float:right">+ 添加检查项</button></h2>
+          <div class="table-wrap">
+            <table class="data-table" id="items-table">
+              <thead>
+                <tr>
+                  <th>检查项名称</th>
+                  <th>NVM 文件</th>
+                  <th>默认值(十六进制)</th>
+                  <th style="width:80px">操作</th>
+                </tr>
+              </thead>
+              <tbody id="items-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <button class="btn btn-primary btn-lg" id="btn-save-config">保存本地配置</button>
+        </div>
+      </section>
+
+      <!-- 批量导出页面 -->
+      <section class="page" id="page-export">
+        <h1 class="page-title">批量导出</h1>
+        <div class="card">
+          <p class="config-hint">选择历史记录进行批量导出。导出文件为 .xlsx 格式，包含 pass/fail 颜色标注。</p>
+          <div class="filter-bar">
+            <input type="text" class="input" id="exp-filter-module" placeholder="按模块型号搜索...">
+            <input type="date" class="input" id="exp-date-from">
+            <span style="color:#999">~</span>
+            <input type="date" class="input" id="exp-date-to">
+            <button class="btn" id="btn-exp-search">搜索</button>
+            <div style="flex:1"></div>
+            <span class="hint-text" id="exp-count">共 0 条</span>
+            <button class="btn btn-primary" id="btn-export-all" disabled>导出全部</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="export-table">
+              <thead>
+                <tr>
+                  <th style="width:40px"><input type="checkbox" id="exp-chk-all"></th>
+                  <th>模块型号</th>
+                  <th>结果</th>
+                  <th>fail信息</th>
+                  <th>检查时间</th>
+                </tr>
+              </thead>
+              <tbody id="export-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast 容器 -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- 依赖脚本 -->
+  <script src="lib/exceljs.min.js"></script>
+  <!-- 应用脚本 -->
+  <script src="lib/db.js"></script>
+  <script src="lib/serial.js"></script>
+  <script src="lib/nvm-parser.js"></script>
+  <script src="lib/config-manager.js"></script>
+  <script src="lib/excel-export.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

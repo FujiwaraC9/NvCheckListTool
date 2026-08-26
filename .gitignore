@@ -1,0 +1,15 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Python (遗留脚本)
+__pycache__/
+*.pyc
+*.pyo
+
+# Local info file
+info.txt
