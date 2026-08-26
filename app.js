@@ -122,7 +122,8 @@ function updateMatchedItems() {
   items.forEach(item => {
     const chip = document.createElement('span');
     chip.className = 'matched-chip';
-    chip.innerHTML = escapeHtml(item.name) + ' <span class="chip-default">=' + escapeHtml(item.default) + '</span>';
+    const noteBtn = item.note ? '<span class="chip-note" title="点击查看备注" data-note="' + escapeHtml(item.note) + '">ⓘ</span>' : '';
+    chip.innerHTML = escapeHtml(item.name) + ' <span class="chip-default">=' + escapeHtml(item.default) + '</span>' + noteBtn;
     box.appendChild(chip);
   });
   if (items.length === 0) {
@@ -357,8 +358,10 @@ function showResultCard(rec, activeItems) {
       chip.style.borderColor = '#e5e7eb';
       chip.style.color = '#6b7280';
     }
+    const noteHtml = item.note ? '<div class="chip-note-inline" title="' + escapeHtml(item.note) + '">ⓘ ' + escapeHtml(item.note) + '</div>' : '';
     chip.innerHTML = '<div class="chip-name">' + escapeHtml(item.name) + ' <b>' + r.verdict.toUpperCase() + '</b></div>' +
-      '<div class="chip-val">' + (r.reason ? escapeHtml(r.reason) : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default)) + '</div>';
+      '<div class="chip-val">' + (r.reason ? escapeHtml(r.reason) : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default)) + '</div>' +
+      noteHtml;
     itemsBox.appendChild(chip);
   });
 
@@ -490,6 +493,7 @@ function renderItemsTable(cfg) {
       '<td><input type="text" class="inp-item-def" value="' + escapeHtml(item.default) + '" style="font-family:Consolas,monospace"></td>' +
       '<td><input type="text" class="inp-item-nvm" value="' + escapeHtml(item.nvm_file || '') + '"></td>' +
       '<td>' + formatConditions(item.conditions) + '</td>' +
+      '<td><input type="text" class="inp-item-note" value="' + escapeHtml(item.note || '') + '" placeholder="无备注" style="font-size:11px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
   });
@@ -502,6 +506,8 @@ function collectConfigFromForm() {
     const name = tr.querySelector('.inp-item-name').value.trim();
     const def = tr.querySelector('.inp-item-def').value.trim();
     const nvm = tr.querySelector('.inp-item-nvm').value.trim();
+    const noteInput = tr.querySelector('.inp-item-note');
+    const note = noteInput ? noteInput.value.trim() : '';
     if (!name) return;
     // 保留原 item 的 conditions
     const orig = (cfg.items || []).find(i => i.name === name);
@@ -510,7 +516,7 @@ function collectConfigFromForm() {
       default: def,
       nvm_file: nvm,
       conditions: orig ? orig.conditions : {},
-      note: orig ? orig.note : undefined,
+      note: note || undefined,
     });
   });
   cfg.items = newItems;
@@ -575,6 +581,14 @@ function bindEvents() {
   $('#btn-connect-port').addEventListener('click', connectPort);
   $('#btn-select-folder').addEventListener('click', selectFolder);
   $('#btn-run-check').addEventListener('click', runCheck);
+
+  // 匹配项 chips 上的备注图标点击事件（委托）
+  $('#matched-items').addEventListener('click', (e) => {
+    const noteEl = e.target.closest('.chip-note');
+    if (noteEl && noteEl.dataset.note) {
+      alert(noteEl.dataset.note);
+    }
+  });
 
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
   $('#btn-filter-reset').addEventListener('click', () => {
@@ -651,6 +665,7 @@ function bindEvents() {
       '<td><input type="text" class="inp-item-def" value="0x0" style="font-family:Consolas,monospace"></td>' +
       '<td><input type="text" class="inp-item-nvm" value="" placeholder="xxx.nvm"></td>' +
       '<td><span class="cond-desc">所有（无条件）</span></td>' +
+      '<td><input type="text" class="inp-item-note" value="" placeholder="无备注" style="font-size:11px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
     tr.querySelector('.inp-item-name').focus();
@@ -711,11 +726,17 @@ function showRecordDetail(rec) {
   lines.push('');
   if (rec.item_names) {
     lines.push('检查项 (' + rec.item_names.length + ' 个):');
+    // 从配置里找 item 的 note
+    const cfgItems = state.cfg.items || [];
     for (const name of rec.item_names) {
       const r = rec.results ? rec.results[name] : null;
+      const item = cfgItems.find(i => i.name === name);
       if (r) {
         lines.push('  ' + name + ': ' + r.verdict.toUpperCase() +
           ' (实际=' + (r.raw != null ? r.raw : '未找到') + ', 默认=' + r.default + ')');
+        if (item && item.note) {
+          lines.push('    备注: ' + item.note);
+        }
       } else {
         lines.push('  ' + name + ': (无结果)');
       }
