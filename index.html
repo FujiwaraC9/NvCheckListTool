@@ -43,12 +43,13 @@
         <h1 class="page-title">一键检查</h1>
 
         <div class="card">
-          <h2 class="card-title">项目选择 <span class="hint-text" id="match-count">匹配 0 个检查项</span></h2>
+          <h2 class="card-title">项目选择 <span class="hint-text" id="match-count">请完成项目选择</span></h2>
           <div class="dimension-grid" id="dimension-grid">
             <!-- 由 JS 动态生成维度下拉框 -->
           </div>
-          <div class="matched-items" id="matched-items">
-            <!-- 匹配的检查项预览 -->
+          <div class="notes-box" id="notes-box" style="display:none">
+            <div class="notes-title">注意事项</div>
+            <div id="notes-list"></div>
           </div>
         </div>
 

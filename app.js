@@ -116,19 +116,36 @@ function renderDimensions() {
 
 function updateMatchedItems() {
   const items = ConfigManager.getActiveItems(state.selection);
-  $('#match-count').textContent = '匹配 ' + items.length + ' 个检查项';
-  const box = $('#matched-items');
-  box.innerHTML = '';
-  items.forEach(item => {
-    const chip = document.createElement('span');
-    chip.className = 'matched-chip';
-    const noteBtn = item.note ? '<span class="chip-note" title="点击查看备注" data-note="' + escapeHtml(item.note) + '">ⓘ</span>' : '';
-    chip.innerHTML = escapeHtml(item.name) + ' <span class="chip-default">=' + escapeHtml(item.default) + '</span>' + noteBtn;
-    box.appendChild(chip);
-  });
-  if (items.length === 0) {
-    box.innerHTML = '<span style="color:#9ca3af;font-size:12px">当前选择下无匹配检查项，请调整项目选择</span>';
+  const dims = ConfigManager.getDimensions();
+  // 统计哪些维度还没选
+  const missingDims = dims.filter(d => !state.selection[d.key]);
+
+  let countText;
+  if (missingDims.length > 0) {
+    const missingLabels = missingDims.map(d => d.label).join('、');
+    countText = '等待选择：' + missingLabels;
+  } else {
+    countText = '匹配 ' + items.length + ' 个检查项';
   }
+  $('#match-count').textContent = countText;
+
+  // 自动显示注意事项：收集所有匹配项里有 note 的
+  const notesBox = $('#notes-box');
+  const notesList = $('#notes-list');
+  notesList.innerHTML = '';
+  const notedItems = items.filter(i => i.note);
+  if (notedItems.length > 0) {
+    notesBox.style.display = '';
+    notedItems.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'note-item';
+      div.innerHTML = '<span class="note-item-name">' + escapeHtml(item.name) + '</span><span>' + escapeHtml(item.note) + '</span>';
+      notesList.appendChild(div);
+    });
+  } else {
+    notesBox.style.display = 'none';
+  }
+
   updateRunButton();
 }
 
@@ -581,14 +598,6 @@ function bindEvents() {
   $('#btn-connect-port').addEventListener('click', connectPort);
   $('#btn-select-folder').addEventListener('click', selectFolder);
   $('#btn-run-check').addEventListener('click', runCheck);
-
-  // 匹配项 chips 上的备注图标点击事件（委托）
-  $('#matched-items').addEventListener('click', (e) => {
-    const noteEl = e.target.closest('.chip-note');
-    if (noteEl && noteEl.dataset.note) {
-      alert(noteEl.dataset.note);
-    }
-  });
 
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
   $('#btn-filter-reset').addEventListener('click', () => {

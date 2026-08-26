@@ -391,46 +391,36 @@ body {
 }
 .dimension-item .select { width: 100%; }
 
-/* 匹配的检查项预览 */
-.matched-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* 注意事项自动展示 */
+.notes-box {
   padding-top: 10px;
   border-top: 1px solid #f1f5f9;
 }
-.matched-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 12px;
+.notes-title {
   font-size: 12px;
-  color: #166534;
-  font-family: "Consolas", monospace;
+  color: #92400e;
+  font-weight: 600;
+  margin-bottom: 6px;
 }
-.matched-chip .chip-default {
-  color: #6b7280;
-  font-size: 11px;
+.note-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background: #fef3c7;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.5;
 }
-.chip-note {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #3b82f6;
-  color: #fff;
-  font-size: 11px;
-  font-weight: bold;
-  cursor: help;
-  margin-left: 4px;
+.note-item .note-item-name {
   flex-shrink: 0;
+  font-family: "Consolas", monospace;
+  font-weight: 600;
+  color: #92400e;
+  min-width: 140px;
 }
-.chip-note:hover { background: #2563eb; }
 .chip-note-inline {
   margin-top: 4px;
   padding: 4px 8px;

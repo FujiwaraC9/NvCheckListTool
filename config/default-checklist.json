@@ -39,8 +39,9 @@
       "key": "baseline",
       "label": "基线",
       "order": 5,
-      "options": ["通用", "UIS7885->5G_MODEM_V2_23A_IEBU_W24.31.2"],
-      "auto_read": false
+      "options": ["UIS7885->5G_MODEM_V2_23A_IEBU_W24.31.2"],
+      "auto_read": true,
+      "auto_read_hint": "待实现：从设备/版本信息自动读取"
     }
   ],
 
