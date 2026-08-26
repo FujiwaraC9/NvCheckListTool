@@ -1,6 +1,6 @@
 /**
- * NvCheckList Web v2 - 主应用逻辑
- * 支持多维度项目选择 + 条件匹配
+ * NvCheckList Web v3 - 主应用逻辑
+ * 多维度项目选择 + 自动读取（平台 AT+QGMR / 基线 AT+CGMR）+ 条件匹配 + 双路径检查
  */
 const state = {
   port: null,
@@ -54,8 +54,6 @@ function formatDateTime(ts) {
     ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 }
 
-function hex(n) { return '0x' + Number(n).toString(16).toUpperCase(); }
-
 // ===== 导航切换 =====
 function switchPage(pageName) {
   $$('.page').forEach(p => p.classList.remove('active'));
@@ -85,6 +83,13 @@ function checkBrowserSupport() {
 
 // ===== 项目选择 =====
 
+/**
+ * 渲染维度选择区（v3）
+ * - platform：下拉（自动读取 AT+QGMR，读出后自动选中；也可手动选）
+ * - android_version：下拉（手动，读取方法待定）
+ * - customer：下拉（选项随安卓版本联动）
+ * - baseline：文本框（自动读取 AT+CGMR，读出后自动填充；可手动修改）
+ */
 function renderDimensions() {
   const grid = $('#dimension-grid');
   grid.innerHTML = '';
@@ -92,33 +97,91 @@ function renderDimensions() {
   for (const d of dims) {
     const item = document.createElement('div');
     item.className = 'dimension-item';
-    const autoTag = d.auto_read ? '<span class="auto-tag">待自动读取</span>' : '';
-    item.innerHTML =
-      '<label>' + escapeHtml(d.label) + autoTag + '</label>' +
-      '<select class="select dim-select" data-key="' + d.key + '">' +
-      '<option value="">（未选择）</option>' +
-      d.options.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('') +
-      '</select>';
+    item.dataset.key = d.key;
+
+    const autoTag = d.auto_read
+      ? '<span class="auto-tag">自动读取 ' + escapeHtml(d.auto_read.command) + '</span>'
+      : (d.auto_read_hint ? '<span class="auto-tag">' + escapeHtml(d.auto_read_hint) + '</span>' : '');
+
+    let control;
+    if (d.key === 'baseline' || (!d.options && !d.options_by)) {
+      // 基线：自由文本输入（自动填充，可手改）
+      control = '<input type="text" class="input dim-input" data-key="' + d.key + '" ' +
+        'placeholder="连接串口后自动读取" value="' + escapeHtml(state.selection[d.key] || '') + '">';
+    } else {
+      // 下拉：选项固定或联动
+      const opts = ConfigManager.getDimOptions(d, state.selection);
+      const optHtml = (opts || []).map(o =>
+        '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
+      control = '<select class="select dim-select" data-key="' + d.key + '">' +
+        '<option value="">（未选择）</option>' + optHtml + '</select>';
+    }
+    item.innerHTML = '<label>' + escapeHtml(d.label) + autoTag + '</label>' + control;
     grid.appendChild(item);
   }
-  // 设置默认值
-  const defaults = ConfigManager.getDefaultSelection();
-  Object.assign(state.selection, defaults);
-  $$('.dim-select').forEach(sel => {
-    sel.value = state.selection[sel.dataset.key] || '';
-    sel.addEventListener('change', () => {
-      state.selection[sel.dataset.key] = sel.value;
-      updateMatchedItems();
-    });
-  });
+  bindDimensionEvents();
+  syncDimensionUI();
   updateMatchedItems();
 }
 
+function bindDimensionEvents() {
+  $$('.dim-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const key = sel.dataset.key;
+      state.selection[key] = sel.value;
+      if (key === 'android_version') {
+        // 安卓版本变化 → 刷新分支选项并清空已选分支
+        state.selection.customer = '';
+        refreshCustomerOptions();
+      }
+      updateMatchedItems();
+    });
+  });
+  $$('.dim-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      state.selection[inp.dataset.key] = inp.value.trim();
+      updateMatchedItems();
+    });
+  });
+}
+
+/** 安卓版本变化后刷新分支下拉选项 */
+function refreshCustomerOptions() {
+  const customerSel = $('.dim-select[data-key="customer"]');
+  if (!customerSel) return;
+  const dim = ConfigManager.getDimension('customer');
+  const opts = ConfigManager.getDimOptions(dim, state.selection) || [];
+  customerSel.innerHTML = '<option value="">（未选择）</option>' +
+    opts.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
+  customerSel.value = '';
+  customerSel.disabled = opts.length === 0;
+}
+
+/** 把 state.selection 同步到 UI 控件 */
+function syncDimensionUI() {
+  $$('.dim-select').forEach(sel => {
+    sel.value = state.selection[sel.dataset.key] || '';
+  });
+  $$('.dim-input').forEach(inp => {
+    inp.value = state.selection[inp.dataset.key] || '';
+  });
+  refreshCustomerOptions();
+  const customerSel = $('.dim-select[data-key="customer"]');
+  if (customerSel && state.selection.customer) {
+    customerSel.value = state.selection.customer;
+  }
+}
+
+/**
+ * 更新匹配数展示 + 注意事项（相同备注合并显示）
+ * 备注输出格式（按需求文档）：
+ *   检查项1、检查项2、检查项3……：（换行）备注xxx
+ */
 function updateMatchedItems() {
   const items = ConfigManager.getActiveItems(state.selection);
   const dims = ConfigManager.getDimensions();
   // 统计哪些维度还没选
-  const missingDims = dims.filter(d => !state.selection[d.key]);
+  const missingDims = dims.filter(d => !state.selection[d.key] && (d.options || d.options_by));
 
   let countText;
   if (missingDims.length > 0) {
@@ -129,19 +192,31 @@ function updateMatchedItems() {
   }
   $('#match-count').textContent = countText;
 
-  // 自动显示注意事项：收集所有匹配项里有 note 的
+  // 注意事项：相同备注的检查项合并为一条
   const notesBox = $('#notes-box');
   const notesList = $('#notes-list');
   notesList.innerHTML = '';
-  const notedItems = items.filter(i => i.note);
-  if (notedItems.length > 0) {
+  const noteGroups = {};
+  const noteOrder = [];
+  for (const item of items) {
+    if (!item.note) continue;
+    if (!noteGroups[item.note]) {
+      noteGroups[item.note] = [];
+      noteOrder.push(item.note);
+    }
+    noteGroups[item.note].push(item.name);
+  }
+  if (noteOrder.length > 0) {
     notesBox.style.display = '';
-    notedItems.forEach(item => {
+    for (const note of noteOrder) {
+      const names = noteGroups[note];
       const div = document.createElement('div');
       div.className = 'note-item';
-      div.innerHTML = '<span class="note-item-name">' + escapeHtml(item.name) + '</span><span>' + escapeHtml(item.note) + '</span>';
+      div.innerHTML =
+        '<div class="note-item-names">' + escapeHtml(names.join('、')) + '：</div>' +
+        '<div class="note-item-text">' + escapeHtml(note) + '</div>';
       notesList.appendChild(div);
-    });
+    }
   } else {
     notesBox.style.display = 'none';
   }
@@ -153,7 +228,7 @@ function updatePortStatus(connected, name) {
   const val = $('#status-port .status-value');
   val.className = 'status-value ' + (connected ? 'connected' : 'disconnected');
   val.innerHTML = '<span class="dot"></span>' + (connected ? '已连接 ' + name : '未连接');
-  $('#btn-connect-port').textContent = connected ? '重新选择' : '连接串口';
+  $('#btn-connect-port').textContent = connected ? '重新连接' : '连接串口';
   updateRunButton();
 }
 
@@ -176,6 +251,9 @@ function updateRunButton() {
   }
 }
 
+/**
+ * 连接串口：选口 → 自动发 AT+QGMR / AT+CGMR 读取平台与基线
+ */
 async function connectPort() {
   if (!Serial.isSupported()) {
     toast('当前浏览器不支持 Web Serial API，请使用 Chrome/Edge。', 'error');
@@ -185,12 +263,54 @@ async function connectPort() {
     const port = await Serial.requestPort(state.cfg.serial.port_keyword);
     state.port = port;
     updatePortStatus(true, '已选择');
-    logLine('串口已选择', 'ok');
+    logLine('串口已选择，正在自动读取平台名和基线版本 ...', 'ok');
     toast('串口已选择', 'success');
+    await autoReadDimensions();
   } catch (e) {
     toast('串口选择失败: ' + e.message, 'error');
     logLine('串口选择失败: ' + e.message, 'err');
   }
+}
+
+/**
+ * 连接串口后自动读取：平台（AT+QGMR）、基线（AT+CGMR）
+ */
+async function autoReadDimensions() {
+  const dims = ConfigManager.getDimensions();
+  const ser = state.cfg.serial;
+
+  for (const d of dims) {
+    if (!d.auto_read || !d.auto_read.command) continue;
+    const cmd = d.auto_read.command;
+    try {
+      logLine('发送 ' + cmd + ' ...', 'info');
+      const resp = await Serial.sendAT(state.port, cmd, {
+        baudrate: ser.baudrate,
+        timeout_ms: ser.response_timeout_ms,
+      });
+      // 原始响应去掉回显和空行后打日志
+      const respLines = resp.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.toUpperCase().startsWith('AT+' + cmd.slice(3)));
+      if (respLines.length > 0) {
+        logLine('  ' + cmd + ' 响应: ' + respLines.join(' | ').substring(0, 300), 'info');
+      }
+      let value = null;
+      if (d.key === 'platform') {
+        value = Serial.parseQgmr(resp, d.options || []);
+      } else if (d.key === 'baseline') {
+        value = Serial.parseCgmr(resp);
+      }
+      if (value) {
+        state.selection[d.key] = value;
+        logLine('  解析到 ' + d.label + ': ' + value, 'ok');
+      } else {
+        logLine('  未能从 ' + cmd + ' 响应中解析 ' + d.label + '，请手动选择/填写', 'warn');
+      }
+    } catch (e) {
+      logLine('  ' + cmd + ' 查询失败: ' + e.message, 'err');
+    }
+  }
+  syncDimensionUI();
+  updateMatchedItems();
 }
 
 async function selectFolder() {
@@ -215,7 +335,19 @@ async function selectFolder() {
 }
 
 /**
- * 核心检查流程（v2：按 selection 过滤检查项）
+ * 根据基线版本判断检查文件类型
+ * - 基线以 FM_BASE 开头 → FM 基线（.nvm 文件）
+ * - 其他（4G_MODEM_ / 5G_MODEM_ 等）→ XML 文件
+ * @returns {'fm'|'xml'|null}
+ */
+function baselineKind(baseline) {
+  if (!baseline) return null;
+  if (/^FM_BASE/i.test(baseline.trim())) return 'fm';
+  return 'xml';
+}
+
+/**
+ * 核心检查流程（v3）
  */
 async function runCheck() {
   $('#btn-run-check').disabled = true;
@@ -229,6 +361,17 @@ async function runCheck() {
   const selDesc = dims.map(d => d.label + '=' + (state.selection[d.key] || '未选')).join('，');
   logLine('项目选择: ' + selDesc, 'info');
 
+  // 基线决定检查文件路径，必须有
+  const baseline = state.selection.baseline;
+  const kind = baselineKind(baseline);
+  if (!kind) {
+    logLine('基线版本未获取（自动读取失败且未手动填写），无法确定检查文件类型，终止', 'err');
+    toast('请先获取/填写基线版本', 'error', 4000);
+    updateRunButton();
+    return;
+  }
+  logLine('基线类型: ' + (kind === 'fm' ? 'FM_BASE（.nvm 文件）' : '4G/5G_MODEM（.xml 文件）'), 'info');
+
   const activeItems = ConfigManager.getActiveItems(state.selection);
   logLine('匹配检查项 ' + activeItems.length + ' 个: ' + activeItems.map(i => i.name).join(', '), 'info');
 
@@ -241,7 +384,7 @@ async function runCheck() {
 
   const cfg = state.cfg;
   try {
-    // 1. AT 查询
+    // 1. AT 查询模块型号
     logLine('[1/3] 查询 AT+QFSGVERSION?  ...', 'step');
     let atFullText = '';
     let module = null;
@@ -268,50 +411,53 @@ async function runCheck() {
       throw new Error('未获取到模块型号（Tag 不存在）');
     }
 
-    // 2. 解析 nvm
-    logLine('[2/3] 解析 NVM 文件（' + activeItems.length + ' 个检查项）...', 'step');
+    // 2. 解析文件
+    logLine('[2/3] 解析检查文件（' + activeItems.length + ' 个检查项，' + (kind === 'fm' ? '.nvm' : '.xml') + '）...', 'step');
     const results = {};
     let allPass = true;
+    let hasChecked = false;
     const missingFiles = new Set();
-    const usedNvmFiles = new Set();
 
     for (const item of activeItems) {
-      const fname = item.nvm_file;
-      // nvm_file 为空表示路径待补充，记为 skip
+      const files = item.files || {};
+      const fname = kind === 'fm' ? files.fm : files.xml;
       if (!fname) {
-        results[item.name] = { verdict: 'skip', raw: null, value: null, default: item.default, reason: 'NVM 文件路径未配置' };
-        logLine('  ' + item.name + '  NVM 文件路径未配置 -> 跳过', 'warn');
+        results[item.name] = { verdict: 'skip', raw: null, value: null, default: item.default, reason: (kind === 'fm' ? 'FM基线' : '4G/5G基线') + '不关注此检查项' };
+        logLine('  ' + item.name + '  ' + (kind === 'fm' ? 'FM基线' : '4G/5G基线') + '不关注 -> 跳过', 'warn');
         continue;
       }
-      usedNvmFiles.add(fname);
       const text = await NvmParser.readFileFromDir(state.dirHandle, fname);
       if (text == null) {
         missingFiles.add(fname);
-        results[item.name] = { verdict: 'fail', raw: null, value: null, default: item.default };
+        results[item.name] = { verdict: 'fail', raw: null, value: null, default: item.default, reason: '文件缺失: ' + fname };
         logLine('  ' + item.name + '  文件 ' + fname + ' 缺失 -> fail', 'err');
         allPass = false;
         continue;
       }
-      const raw = NvmParser.parseItemContent(text, item.name);
+      const raw = NvmParser.parseItemValue(fname, text, item.name);
       const val = NvmParser.normalizeValue(raw);
       const def = NvmParser.normalizeValue(item.default);
       let verdict;
       if (val == null) {
         verdict = 'fail';
-        logLine('  ' + item.name + '  未找到或无法解析 -> fail', 'err');
+        logLine('  ' + item.name + '  在 ' + fname + ' 中未找到或无法解析 -> fail', 'err');
       } else if (val === def) {
         verdict = 'pass';
-        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + ' -> pass', 'ok');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + '  (' + fname + ') -> pass', 'ok');
       } else {
         verdict = 'fail';
-        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + ' -> fail', 'err');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + '  (' + fname + ') -> fail', 'err');
       }
       if (verdict === 'fail') allPass = false;
-      results[item.name] = { verdict, raw, value: val, default: item.default };
+      hasChecked = true;
+      results[item.name] = { verdict, raw, value: val, default: item.default, file: fname };
     }
 
     if (missingFiles.size > 0) {
-      logLine('缺失 NVM 文件: ' + Array.from(missingFiles).join(', '), 'warn');
+      logLine('缺失文件: ' + Array.from(missingFiles).join(', '), 'warn');
+    }
+    if (!hasChecked) {
+      logLine('没有任何实际执行的检查项（全部跳过）', 'warn');
     }
 
     // 构造 fail 信息（不含 skip）
@@ -334,6 +480,7 @@ async function runCheck() {
       timestamp: Date.now(),
       project: state.dirName,
       selection: { ...state.selection },
+      baseline_kind: kind,
       item_names: activeItems.map(i => i.name),
     };
     const id = await DB.addRecord(record);
@@ -366,7 +513,6 @@ function showResultCard(rec, activeItems) {
   (activeItems || []).forEach(item => {
     const r = rec.results[item.name] || { verdict: 'skip' };
     const chip = document.createElement('div');
-    // skip 用灰色
     const cls = r.verdict === 'skip' ? 'pass' : r.verdict;
     chip.className = 'result-chip ' + cls;
     if (r.verdict === 'skip') {
@@ -375,10 +521,13 @@ function showResultCard(rec, activeItems) {
       chip.style.borderColor = '#e5e7eb';
       chip.style.color = '#6b7280';
     }
-    const noteHtml = item.note ? '<div class="chip-note-inline" title="' + escapeHtml(item.note) + '">ⓘ ' + escapeHtml(item.note) + '</div>' : '';
+    const noteHtml = item.note ? '<div class="chip-note-inline">ⓘ ' + escapeHtml(item.note) + '</div>' : '';
+    const valText = r.reason
+      ? escapeHtml(r.reason)
+      : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default) +
+        (r.file ? '  [' + escapeHtml(r.file) + ']' : '');
     chip.innerHTML = '<div class="chip-name">' + escapeHtml(item.name) + ' <b>' + r.verdict.toUpperCase() + '</b></div>' +
-      '<div class="chip-val">' + (r.reason ? escapeHtml(r.reason) : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default)) + '</div>' +
-      noteHtml;
+      '<div class="chip-val">' + valText + '</div>' + noteHtml;
     itemsBox.appendChild(chip);
   });
 
@@ -423,8 +572,8 @@ function renderHistoryTable() {
   } else {
     pageData.forEach(rec => {
       const tr = document.createElement('tr');
-      // 展示选择信息
-      const selText = rec.selection ? Object.entries(rec.selection).filter(([,v]) => v).map(([k,v]) => k + '=' + v).join('，') : '';
+      // 展示选择信息（平台/安卓/分支/基线）
+      const selText = rec.selection ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，') : '';
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
         '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:11px;color:#9ca3af">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
@@ -493,8 +642,11 @@ function formatConditions(cond) {
   if (!cond || Object.keys(cond).length === 0) {
     return '<span class="cond-desc">所有（无条件）</span>';
   }
+  const labelMap = {};
+  ConfigManager.getDimensions().forEach(d => { labelMap[d.key] = d.label; });
   const parts = Object.entries(cond).map(([k, vals]) => {
-    return '<span class="cond-key">' + escapeHtml(k) + '</span>=<span class="cond-val">[' + vals.map(escapeHtml).join(', ') + ']</span>';
+    const lbl = labelMap[k] || k;
+    return '<span class="cond-key">' + escapeHtml(lbl) + '</span>=<span class="cond-val">[' + vals.map(escapeHtml).join(', ') + ']</span>';
   });
   return '<div class="cond-desc">' + parts.join('<br>') + '</div>';
 }
@@ -504,11 +656,13 @@ function renderItemsTable(cfg) {
   tbody.innerHTML = '';
   const items = cfg.items || [];
   items.forEach(item => {
+    const files = item.files || {};
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td><input type="text" class="inp-item-name" value="' + escapeHtml(item.name) + '"></td>' +
       '<td><input type="text" class="inp-item-def" value="' + escapeHtml(item.default) + '" style="font-family:Consolas,monospace"></td>' +
-      '<td><input type="text" class="inp-item-nvm" value="' + escapeHtml(item.nvm_file || '') + '"></td>' +
+      '<td><input type="text" class="inp-item-fm" value="' + escapeHtml(files.fm || '') + '" placeholder="不关注可留空"></td>' +
+      '<td><input type="text" class="inp-item-xml" value="' + escapeHtml(files.xml || '') + '" placeholder="不关注可留空"></td>' +
       '<td>' + formatConditions(item.conditions) + '</td>' +
       '<td><input type="text" class="inp-item-note" value="' + escapeHtml(item.note || '') + '" placeholder="无备注" style="font-size:11px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
@@ -522,7 +676,8 @@ function collectConfigFromForm() {
   $$('#items-tbody tr').forEach(tr => {
     const name = tr.querySelector('.inp-item-name').value.trim();
     const def = tr.querySelector('.inp-item-def').value.trim();
-    const nvm = tr.querySelector('.inp-item-nvm').value.trim();
+    const fm = tr.querySelector('.inp-item-fm').value.trim();
+    const xml = tr.querySelector('.inp-item-xml').value.trim();
     const noteInput = tr.querySelector('.inp-item-note');
     const note = noteInput ? noteInput.value.trim() : '';
     if (!name) return;
@@ -531,7 +686,7 @@ function collectConfigFromForm() {
     newItems.push({
       name,
       default: def,
-      nvm_file: nvm,
+      files: { fm: fm || null, xml: xml || null },
       conditions: orig ? orig.conditions : {},
       note: note || undefined,
     });
@@ -654,7 +809,7 @@ function bindEvents() {
     await ConfigManager.refreshCloud();
     state.cfg = ConfigManager.get();
     refreshConfigPage();
-    renderDimensions(); // 维度可能变了
+    renderDimensions();
     toast('已刷新云端默认配置', 'success');
   });
   $('#btn-reset-default').addEventListener('click', () => {
@@ -672,7 +827,8 @@ function bindEvents() {
     tr.innerHTML =
       '<td><input type="text" class="inp-item-name" value="" placeholder="item_name"></td>' +
       '<td><input type="text" class="inp-item-def" value="0x0" style="font-family:Consolas,monospace"></td>' +
-      '<td><input type="text" class="inp-item-nvm" value="" placeholder="xxx.nvm"></td>' +
+      '<td><input type="text" class="inp-item-fm" value="" placeholder="不关注可留空"></td>' +
+      '<td><input type="text" class="inp-item-xml" value="" placeholder="不关注可留空"></td>' +
       '<td><span class="cond-desc">所有（无条件）</span></td>' +
       '<td><input type="text" class="inp-item-note" value="" placeholder="无备注" style="font-size:11px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
@@ -726,23 +882,25 @@ function showRecordDetail(rec) {
   lines.push('检查时间: ' + formatDateTime(rec.timestamp));
   lines.push('总体结果: ' + rec.overall.toUpperCase());
   if (rec.selection) {
+    const labelMap = {};
+    ConfigManager.getDimensions().forEach(d => { labelMap[d.key] = d.label; });
     lines.push('');
     lines.push('项目选择:');
     for (const [k, v] of Object.entries(rec.selection)) {
-      if (v) lines.push('  ' + k + ' = ' + v);
+      if (v) lines.push('  ' + (labelMap[k] || k) + ' = ' + v);
     }
   }
   lines.push('');
   if (rec.item_names) {
+    const cfgItems = (state.cfg && state.cfg.items) || [];
     lines.push('检查项 (' + rec.item_names.length + ' 个):');
-    // 从配置里找 item 的 note
-    const cfgItems = state.cfg.items || [];
     for (const name of rec.item_names) {
       const r = rec.results ? rec.results[name] : null;
       const item = cfgItems.find(i => i.name === name);
       if (r) {
         lines.push('  ' + name + ': ' + r.verdict.toUpperCase() +
-          ' (实际=' + (r.raw != null ? r.raw : '未找到') + ', 默认=' + r.default + ')');
+          ' (实际=' + (r.raw != null ? r.raw : '未找到') + ', 默认=' + r.default +
+          (r.file ? ', 文件=' + r.file : '') + ')');
         if (item && item.note) {
           lines.push('    备注: ' + item.note);
         }
@@ -787,7 +945,8 @@ async function init() {
     state.cfg = ConfigManager.get();
   }
 
-  // 渲染项目选择维度
+  // 初始化项目选择
+  Object.assign(state.selection, ConfigManager.getDefaultSelection());
   renderDimensions();
 
   try {
@@ -795,12 +954,12 @@ async function init() {
     if (ports.length > 0) {
       state.port = ports[0];
       updatePortStatus(true, '已记住');
-      logLine('检测到上次已授权的串口', 'ok');
+      logLine('检测到上次已授权的串口，可点击"重新连接"读取平台/基线', 'ok');
     }
   } catch (e) { /* ignore */ }
 
   updateRunButton();
-  logLine('就绪。请选择项目、连接串口、选择文件夹后点击"开始检查"。', 'info');
+  logLine('就绪。请连接串口（自动读取平台/基线）、选择安卓版本和分支、选择文件夹后点击"开始检查"。', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
