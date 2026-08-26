@@ -363,6 +363,69 @@ body {
 .link-btn:hover { text-decoration: underline; }
 .link-btn.danger { color: #dc2626; }
 
+/* 维度选择网格 */
+.dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.dimension-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dimension-item label {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.dimension-item label .auto-tag {
+  font-size: 10px;
+  color: #3b82f6;
+  background: #eff6ff;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 6px;
+  font-weight: 400;
+}
+.dimension-item .select { width: 100%; }
+
+/* 匹配的检查项预览 */
+.matched-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+.matched-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  font-size: 12px;
+  color: #166534;
+  font-family: "Consolas", monospace;
+}
+.matched-chip .chip-default {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+/* 配置管理页 - 条件描述 */
+.cond-desc {
+  font-size: 11px;
+  color: #6b7280;
+  font-family: "Consolas", monospace;
+  line-height: 1.5;
+}
+.cond-desc .cond-key { color: #3b82f6; }
+.cond-desc .cond-val { color: #059669; }
+
 /* 响应式 */
 @media (max-width: 900px) {
   .sidebar { width: 60px; }

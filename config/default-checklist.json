@@ -1,31 +1,144 @@
 {
-  "version": 1,
+  "version": 2,
   "updated_at": "2026-08-26",
-  "description": "展锐 Android10 NV Checklist 默认检查项（云端默认配置，仅维护者可改）",
-  "defaults": {
-    "edch_Category": 7,
-    "cap_log_enable": 0,
-    "dsp_log_set": 0,
-    "gea_encryption_algo1": 0,
-    "gea_algo2": 0,
-    "sim_hot_plug_cfg": 0
-  },
-  "nvm_files": {
-    "edch_Category": "td_nv_type.nvm",
-    "gea_encryption_algo1": "td_nv_type.nvm",
-    "gea_algo2": "td_nv_type.nvm",
-    "dsp_log_set": "nv_type_4band.nvm",
-    "cap_log_enable": "nv_type_4band.nvm",
-    "sim_hot_plug_cfg": "ProductionParam.nvm"
-  },
-  "check_items": [
-    "edch_Category",
-    "cap_log_enable",
-    "dsp_log_set",
-    "gea_encryption_algo1",
-    "gea_algo2",
-    "sim_hot_plug_cfg"
+  "description": "NV Checklist 云端默认配置 v2 - 多维度项目选择（来源：checklist.xlsx）",
+
+  "dimensions": [
+    {
+      "key": "platform",
+      "label": "平台",
+      "order": 1,
+      "options": ["7885", "8541"],
+      "auto_read": true,
+      "auto_read_hint": "待实现：从设备/版本信息自动读取"
+    },
+    {
+      "key": "android_version",
+      "label": "安卓版本",
+      "order": 2,
+      "options": ["9", "10", "12"],
+      "auto_read": true,
+      "auto_read_hint": "待实现：从设备/版本信息自动读取"
+    },
+    {
+      "key": "nv_type",
+      "label": "NV 类型",
+      "order": 3,
+      "options": ["release", "debug"],
+      "default": "release",
+      "auto_read": false
+    },
+    {
+      "key": "customer",
+      "label": "客户/项目",
+      "order": 4,
+      "options": ["通用", "新大陆", "东集", "星云", "优博讯", "飞天"],
+      "auto_read": false
+    },
+    {
+      "key": "baseline",
+      "label": "基线",
+      "order": 5,
+      "options": ["通用", "5G_MODEM_V2_23A_IEBU_W24.31.2"],
+      "auto_read": false
+    }
   ],
+
+  "items": [
+    {
+      "name": "edch_Category",
+      "default": "0x7",
+      "nvm_file": "",
+      "conditions": {}
+    },
+    {
+      "name": "nas_ue_mode[0]",
+      "default": "0x2",
+      "nvm_file": "",
+      "conditions": { "customer": ["新大陆"], "android_version": ["12"] }
+    },
+    {
+      "name": "nas_ue_mode[1]",
+      "default": "0x2",
+      "nvm_file": "",
+      "conditions": { "customer": ["新大陆"], "android_version": ["12"] }
+    },
+    {
+      "name": "nas_ue_usage_setting[0]",
+      "default": "0x1",
+      "nvm_file": "",
+      "conditions": { "customer": ["新大陆"], "android_version": ["12"] }
+    },
+    {
+      "name": "nas_ue_usage_setting[1]",
+      "default": "0x1",
+      "nvm_file": "",
+      "conditions": { "customer": ["新大陆"], "android_version": ["12"] }
+    },
+    {
+      "name": "dsp_log_set",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": { "nv_type": ["debug"], "android_version": ["9", "10", "12"] },
+      "note": "7885平台无需关注，base 默认是开启。check时候关闭设备的ylog，直接check版本包里的是否关闭"
+    },
+    {
+      "name": "reserved2",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": { "nv_type": ["debug"], "android_version": ["9"] }
+    },
+    {
+      "name": "cap_log_enable",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": { "nv_type": ["debug"], "android_version": ["9", "10", "12"] }
+    },
+    {
+      "name": "cs_eb_enable",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": { "nv_type": ["debug"], "android_version": ["12"] }
+    },
+    {
+      "name": "sim_cap_switch",
+      "default": "0x2C",
+      "nvm_file": "",
+      "conditions": { "android_version": ["10", "12"] },
+      "note": "目前在8541平台核查，飞天项目必须合入，其他项目RF更新后再陆续合入，非飞天项目暂不关注。原表适用项目列写安卓10和12，与备注存在分歧，现按适用项目列处理。"
+    },
+    {
+      "name": "gea_encryption_algo1",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": {}
+    },
+    {
+      "name": "gea_algo2",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": {}
+    },
+    {
+      "name": "sim_hot_plug_cfg",
+      "default": "0x0",
+      "nvm_file": "",
+      "conditions": { "customer": ["通用", "新大陆", "飞天"] }
+    },
+    {
+      "name": "nv_nas_config[10]",
+      "default": "0x10",
+      "nvm_file": "",
+      "conditions": { "platform": ["8541"], "android_version": ["12"] }
+    },
+    {
+      "name": "nv_nas_config[11]",
+      "default": "0x1",
+      "nvm_file": "",
+      "conditions": { "baseline": ["5G_MODEM_V2_23A_IEBU_W24.31.2"] }
+    }
+  ],
+
   "serial": {
     "port_keyword": "SPRD LTE AT(WIQ)",
     "baudrate": 115200,

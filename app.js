@@ -1,17 +1,13 @@
 /**
- * NvCheckList Web - 主应用逻辑
- * 协调：导航、四个页面（一键检查 / 历史记录 / 配置管理 / 批量导出）
- *
- * 全局状态：
- *   state.port       - 已连接的 SerialPort（Web Serial）
- *   state.dirHandle  - FileSystemDirectoryHandle（选中的项目文件夹）
- *   state.cfg        - 当前生效的配置（ConfigManager.get() 的快照）
+ * NvCheckList Web v2 - 主应用逻辑
+ * 支持多维度项目选择 + 条件匹配
  */
 const state = {
   port: null,
   dirHandle: null,
   dirName: '',
   cfg: null,
+  selection: {},          // 当前项目选择 { dimKey: value }
   // 历史记录页面分页
   historyPage: 1,
   pageSize: 20,
@@ -68,14 +64,11 @@ function switchPage(pageName) {
   if (page) page.classList.add('active');
   const nav = $$('.nav-item').find(n => n.dataset.page === pageName);
   if (nav) nav.classList.add('active');
-
-  // 切页时刷新内容
   if (pageName === 'history') refreshHistoryPage();
   if (pageName === 'config') refreshConfigPage();
   if (pageName === 'export') refreshExportPage();
 }
 
-// ===== 浏览器能力检测 =====
 function checkBrowserSupport() {
   const warnings = [];
   if (!Serial.isSupported()) {
@@ -90,7 +83,53 @@ function checkBrowserSupport() {
   return warnings;
 }
 
-// ===== 一键检查页面 =====
+// ===== 项目选择 =====
+
+function renderDimensions() {
+  const grid = $('#dimension-grid');
+  grid.innerHTML = '';
+  const dims = ConfigManager.getDimensions();
+  for (const d of dims) {
+    const item = document.createElement('div');
+    item.className = 'dimension-item';
+    const autoTag = d.auto_read ? '<span class="auto-tag">待自动读取</span>' : '';
+    item.innerHTML =
+      '<label>' + escapeHtml(d.label) + autoTag + '</label>' +
+      '<select class="select dim-select" data-key="' + d.key + '">' +
+      '<option value="">（未选择）</option>' +
+      d.options.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('') +
+      '</select>';
+    grid.appendChild(item);
+  }
+  // 设置默认值
+  const defaults = ConfigManager.getDefaultSelection();
+  Object.assign(state.selection, defaults);
+  $$('.dim-select').forEach(sel => {
+    sel.value = state.selection[sel.dataset.key] || '';
+    sel.addEventListener('change', () => {
+      state.selection[sel.dataset.key] = sel.value;
+      updateMatchedItems();
+    });
+  });
+  updateMatchedItems();
+}
+
+function updateMatchedItems() {
+  const items = ConfigManager.getActiveItems(state.selection);
+  $('#match-count').textContent = '匹配 ' + items.length + ' 个检查项';
+  const box = $('#matched-items');
+  box.innerHTML = '';
+  items.forEach(item => {
+    const chip = document.createElement('span');
+    chip.className = 'matched-chip';
+    chip.innerHTML = escapeHtml(item.name) + ' <span class="chip-default">=' + escapeHtml(item.default) + '</span>';
+    box.appendChild(chip);
+  });
+  if (items.length === 0) {
+    box.innerHTML = '<span style="color:#9ca3af;font-size:12px">当前选择下无匹配检查项，请调整项目选择</span>';
+  }
+  updateRunButton();
+}
 
 function updatePortStatus(connected, name) {
   const val = $('#status-port .status-value');
@@ -109,8 +148,14 @@ function updateFolderStatus(connected, name) {
 }
 
 function updateRunButton() {
-  const ok = state.port && state.dirHandle;
+  const activeItems = ConfigManager.getActiveItems(state.selection);
+  const ok = state.port && state.dirHandle && activeItems.length > 0;
   $('#btn-run-check').disabled = !ok;
+  if (state.port && state.dirHandle && activeItems.length === 0) {
+    $('#btn-run-check').textContent = '无匹配检查项';
+  } else {
+    $('#btn-run-check').textContent = '开始检查';
+  }
 }
 
 async function connectPort() {
@@ -137,7 +182,6 @@ async function selectFolder() {
   }
   try {
     const handle = await window.showDirectoryPicker();
-    // 请求读写权限
     await handle.requestPermission({ mode: 'read' });
     state.dirHandle = handle;
     state.dirName = handle.name;
@@ -153,7 +197,7 @@ async function selectFolder() {
 }
 
 /**
- * 核心检查流程
+ * 核心检查流程（v2：按 selection 过滤检查项）
  */
 async function runCheck() {
   $('#btn-run-check').disabled = true;
@@ -162,17 +206,27 @@ async function runCheck() {
   panel.innerHTML = '';
   logLine('开始执行检查 ...', 'step');
 
-  const cfg = state.cfg;
-  const checkItems = cfg.check_items;
-  const defaults = cfg.defaults;
-  const nvmFiles = cfg.nvm_files;
+  // 打印当前选择
+  const dims = ConfigManager.getDimensions();
+  const selDesc = dims.map(d => d.label + '=' + (state.selection[d.key] || '未选')).join('，');
+  logLine('项目选择: ' + selDesc, 'info');
 
+  const activeItems = ConfigManager.getActiveItems(state.selection);
+  logLine('匹配检查项 ' + activeItems.length + ' 个: ' + activeItems.map(i => i.name).join(', '), 'info');
+
+  if (activeItems.length === 0) {
+    logLine('无匹配检查项，终止', 'err');
+    toast('无匹配检查项，请调整项目选择', 'warning');
+    updateRunButton();
+    return;
+  }
+
+  const cfg = state.cfg;
   try {
     // 1. AT 查询
     logLine('[1/3] 查询 AT+QFSGVERSION?  ...', 'step');
     let atFullText = '';
     let module = null;
-    let infoLines = [];
     try {
       const resp = await Serial.sendAT(state.port, cfg.serial.at_command, {
         baudrate: cfg.serial.baudrate,
@@ -182,73 +236,76 @@ async function runCheck() {
       const parsed = Serial.parseQfsgversion(resp);
       atFullText = parsed.atFullText;
       module = parsed.module;
-      infoLines = parsed.lines;
-      if (!module) {
-        logLine('响应中未找到 Tag:，可能模块未就绪。尝试从已缓存 info.txt 回退 ...', 'warn');
-      } else {
+      if (module) {
         logLine('模块型号: ' + module, 'ok');
-        logLine('AT 内容解析成功，共 ' + infoLines.length + ' 行', 'ok');
+      } else {
+        logLine('响应中未找到 Tag:', 'warn');
       }
     } catch (e) {
       logLine('串口查询失败: ' + e.message, 'err');
-      throw new Error('串口查询失败: ' + e.message);
+      throw e;
     }
 
     if (!module) {
-      throw new Error('未获取到模块型号（Tag 不存在），请确认模块已上电且 AT 口正常');
+      throw new Error('未获取到模块型号（Tag 不存在）');
     }
 
     // 2. 解析 nvm
-    logLine('[2/3] 解析 NVM 文件 ...', 'step');
+    logLine('[2/3] 解析 NVM 文件（' + activeItems.length + ' 个检查项）...', 'step');
     const results = {};
-    const raws = {};
     let allPass = true;
     const missingFiles = new Set();
+    const usedNvmFiles = new Set();
 
-    for (const item of checkItems) {
-      const fname = nvmFiles[item];
+    for (const item of activeItems) {
+      const fname = item.nvm_file;
+      // nvm_file 为空表示路径待补充，记为 skip
+      if (!fname) {
+        results[item.name] = { verdict: 'skip', raw: null, value: null, default: item.default, reason: 'NVM 文件路径未配置' };
+        logLine('  ' + item.name + '  NVM 文件路径未配置 -> 跳过', 'warn');
+        continue;
+      }
+      usedNvmFiles.add(fname);
       const text = await NvmParser.readFileFromDir(state.dirHandle, fname);
       if (text == null) {
         missingFiles.add(fname);
-        raws[item] = null;
-        results[item] = { verdict: 'fail', raw: null, value: null, default: defaults[item] };
-        logLine('  ' + item + '  文件 ' + fname + ' 缺失 -> fail', 'err');
+        results[item.name] = { verdict: 'fail', raw: null, value: null, default: item.default };
+        logLine('  ' + item.name + '  文件 ' + fname + ' 缺失 -> fail', 'err');
         allPass = false;
         continue;
       }
-      const raw = NvmParser.parseItemContent(text, item);
+      const raw = NvmParser.parseItemContent(text, item.name);
       const val = NvmParser.normalizeValue(raw);
-      const def = defaults[item];
+      const def = NvmParser.normalizeValue(item.default);
       let verdict;
       if (val == null) {
         verdict = 'fail';
-        logLine('  ' + item + '  未找到 ITEM_CONTENT 或无法解析 -> fail', 'err');
+        logLine('  ' + item.name + '  未找到或无法解析 -> fail', 'err');
       } else if (val === def) {
         verdict = 'pass';
-        logLine('  ' + item + '  值=' + (raw || '') + '  默认=' + hex(def) + ' -> pass', 'ok');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + ' -> pass', 'ok');
       } else {
         verdict = 'fail';
-        logLine('  ' + item + '  值=' + (raw || '') + '  默认=' + hex(def) + ' -> fail', 'err');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + ' -> fail', 'err');
       }
       if (verdict === 'fail') allPass = false;
-      results[item] = { verdict, raw, value: val, default: def };
-      raws[item] = raw;
+      results[item.name] = { verdict, raw, value: val, default: item.default };
     }
 
     if (missingFiles.size > 0) {
       logLine('缺失 NVM 文件: ' + Array.from(missingFiles).join(', '), 'warn');
     }
 
-    // 构造 fail 信息
+    // 构造 fail 信息（不含 skip）
     const failLines = [];
-    for (const item of checkItems) {
-      if (results[item].verdict === 'fail') {
-        const raw = raws[item];
-        failLines.push(item + '=' + (raw != null ? raw : '未找到'));
+    for (const item of activeItems) {
+      const r = results[item.name];
+      if (r && r.verdict === 'fail') {
+        failLines.push(item.name + '=' + (r.raw != null ? r.raw : '未找到'));
       }
     }
 
-    // 3. 写入本地数据库
+    // 3. 写入数据库
     logLine('[3/3] 保存到本地数据库 ...', 'step');
     const record = {
       module,
@@ -258,14 +315,15 @@ async function runCheck() {
       overall: allPass ? 'pass' : 'fail',
       timestamp: Date.now(),
       project: state.dirName,
+      selection: { ...state.selection },
+      item_names: activeItems.map(i => i.name),
     };
     const id = await DB.addRecord(record);
     logLine('记录已保存（id=' + id + '）', 'ok');
     logLine('=================================', 'info');
     logLine('检查完成，总体结果: ' + (allPass ? 'PASS ✓' : 'FAIL ✗'), allPass ? 'ok' : 'err');
 
-    // 显示结果卡片
-    showResultCard(record);
+    showResultCard(record, activeItems);
     toast('检查完成: ' + (allPass ? 'PASS' : 'FAIL'), allPass ? 'success' : 'warning');
   } catch (e) {
     logLine('检查失败: ' + e.message, 'err');
@@ -276,7 +334,7 @@ async function runCheck() {
   }
 }
 
-function showResultCard(rec) {
+function showResultCard(rec, activeItems) {
   const card = $('#result-card');
   card.style.display = '';
   const badge = $('#result-badge');
@@ -287,12 +345,20 @@ function showResultCard(rec) {
 
   const itemsBox = $('#result-items');
   itemsBox.innerHTML = '';
-  state.cfg.check_items.forEach(item => {
-    const r = rec.results[item];
+  (activeItems || []).forEach(item => {
+    const r = rec.results[item.name] || { verdict: 'skip' };
     const chip = document.createElement('div');
-    chip.className = 'result-chip ' + r.verdict;
-    chip.innerHTML = '<div class="chip-name">' + escapeHtml(item) + ' <b>' + r.verdict.toUpperCase() + '</b></div>' +
-      '<div class="chip-val">实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + hex(r.default) + '</div>';
+    // skip 用灰色
+    const cls = r.verdict === 'skip' ? 'pass' : r.verdict;
+    chip.className = 'result-chip ' + cls;
+    if (r.verdict === 'skip') {
+      chip.style.opacity = '0.5';
+      chip.style.background = '#f3f4f6';
+      chip.style.borderColor = '#e5e7eb';
+      chip.style.color = '#6b7280';
+    }
+    chip.innerHTML = '<div class="chip-name">' + escapeHtml(item.name) + ' <b>' + r.verdict.toUpperCase() + '</b></div>' +
+      '<div class="chip-val">' + (r.reason ? escapeHtml(r.reason) : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default)) + '</div>';
     itemsBox.appendChild(chip);
   });
 
@@ -337,9 +403,11 @@ function renderHistoryTable() {
   } else {
     pageData.forEach(rec => {
       const tr = document.createElement('tr');
+      // 展示选择信息
+      const selText = rec.selection ? Object.entries(rec.selection).filter(([,v]) => v).map(([k,v]) => k + '=' + v).join('，') : '';
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
-        '<td>' + escapeHtml(rec.module || '-') + '</td>' +
+        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:11px;color:#9ca3af">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
         '<td><span class="cell-' + rec.overall + '">' + rec.overall.toUpperCase() + '</span></td>' +
         '<td class="cell-fail-text">' + escapeHtml(rec.fail_text || '-') + '</td>' +
         '<td>' + formatDateTime(rec.timestamp) + '</td>' +
@@ -349,13 +417,11 @@ function renderHistoryTable() {
     });
   }
 
-  // 分页
   renderPagination($('#history-pagination'), state.historyPage, totalPages, (p) => {
     state.historyPage = p;
     renderHistoryTable();
   });
 
-  // 绑定
   $('#chk-select-all').checked = false;
   $('#btn-delete-selected').disabled = true;
   $('#btn-export-selected').disabled = true;
@@ -372,7 +438,6 @@ function renderPagination(container, cur, total, onGo) {
     container.appendChild(b);
   };
   btn('‹', cur - 1, cur <= 1);
-  // 页码范围
   let start = Math.max(1, cur - 2);
   let end = Math.min(total, start + 4);
   start = Math.max(1, end - 4);
@@ -404,50 +469,58 @@ function refreshConfigPage() {
   renderItemsTable(cfg);
 }
 
+function formatConditions(cond) {
+  if (!cond || Object.keys(cond).length === 0) {
+    return '<span class="cond-desc">所有（无条件）</span>';
+  }
+  const parts = Object.entries(cond).map(([k, vals]) => {
+    return '<span class="cond-key">' + escapeHtml(k) + '</span>=<span class="cond-val">[' + vals.map(escapeHtml).join(', ') + ']</span>';
+  });
+  return '<div class="cond-desc">' + parts.join('<br>') + '</div>';
+}
+
 function renderItemsTable(cfg) {
   const tbody = $('#items-tbody');
   tbody.innerHTML = '';
-  cfg.check_items.forEach(name => {
+  const items = cfg.items || [];
+  items.forEach(item => {
     const tr = document.createElement('tr');
-    const defVal = cfg.defaults[name];
-    const nvm = cfg.nvm_files[name] || '';
     tr.innerHTML =
-      '<td><input type="text" class="inp-item-name" value="' + escapeHtml(name) + '" data-orig="' + escapeHtml(name) + '"></td>' +
-      '<td><input type="text" class="inp-item-nvm" value="' + escapeHtml(nvm) + '"></td>' +
-      '<td><input type="text" class="inp-item-def" value="' + (defVal != null ? '0x' + defVal.toString(16).toUpperCase() : '0x0') + '" style="font-family:Consolas,monospace"></td>' +
-      '<td><button class="link-btn danger btn-remove-item" data-name="' + escapeHtml(name) + '">删除</button></td>';
+      '<td><input type="text" class="inp-item-name" value="' + escapeHtml(item.name) + '"></td>' +
+      '<td><input type="text" class="inp-item-def" value="' + escapeHtml(item.default) + '" style="font-family:Consolas,monospace"></td>' +
+      '<td><input type="text" class="inp-item-nvm" value="' + escapeHtml(item.nvm_file || '') + '"></td>' +
+      '<td>' + formatConditions(item.conditions) + '</td>' +
+      '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
   });
 }
 
 function collectConfigFromForm() {
-  const cfg = {
-    version: 1,
-    updated_at: new Date().toISOString().slice(0, 10),
-    description: '本地用户配置',
-    defaults: {},
-    nvm_files: {},
-    check_items: [],
-    serial: {
-      port_keyword: $('#cfg-port-keyword').value.trim() || 'SPRD LTE AT(WIQ)',
-      baudrate: parseInt($('#cfg-baudrate').value) || 115200,
-      at_command: $('#cfg-at-command').value.trim() || 'AT+QFSGVERSION?',
-      response_timeout_ms: parseInt($('#cfg-timeout').value) || 2000,
-    },
-  };
+  const cfg = ConfigManager.get(); // 保留 dimensions/serial 等
+  const newItems = [];
   $$('#items-tbody tr').forEach(tr => {
-    const nameInput = tr.querySelector('.inp-item-name');
-    const nvmInput = tr.querySelector('.inp-item-nvm');
-    const defInput = tr.querySelector('.inp-item-def');
-    const name = nameInput.value.trim();
-    const nvm = nvmInput.value.trim();
-    const defRaw = defInput.value.trim();
+    const name = tr.querySelector('.inp-item-name').value.trim();
+    const def = tr.querySelector('.inp-item-def').value.trim();
+    const nvm = tr.querySelector('.inp-item-nvm').value.trim();
     if (!name) return;
-    cfg.check_items.push(name);
-    cfg.nvm_files[name] = nvm;
-    const val = NvmParser.normalizeValue(defRaw);
-    cfg.defaults[name] = val != null ? val : 0;
+    // 保留原 item 的 conditions
+    const orig = (cfg.items || []).find(i => i.name === name);
+    newItems.push({
+      name,
+      default: def,
+      nvm_file: nvm,
+      conditions: orig ? orig.conditions : {},
+      note: orig ? orig.note : undefined,
+    });
   });
+  cfg.items = newItems;
+  cfg.serial = {
+    port_keyword: $('#cfg-port-keyword').value.trim() || 'SPRD LTE AT(WIQ)',
+    baudrate: parseInt($('#cfg-baudrate').value) || 115200,
+    at_command: $('#cfg-at-command').value.trim() || 'AT+QFSGVERSION?',
+    response_timeout_ms: parseInt($('#cfg-timeout').value) || 2000,
+  };
+  cfg.updated_at = new Date().toISOString().slice(0, 10);
   return cfg;
 }
 
@@ -495,17 +568,14 @@ function getCheckedIds(cls) {
 
 // ===== 事件绑定 =====
 function bindEvents() {
-  // 导航
   $$('.nav-item').forEach(n => {
     n.addEventListener('click', () => switchPage(n.dataset.page));
   });
 
-  // 一键检查
   $('#btn-connect-port').addEventListener('click', connectPort);
   $('#btn-select-folder').addEventListener('click', selectFolder);
   $('#btn-run-check').addEventListener('click', runCheck);
 
-  // 历史
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
   $('#btn-filter-reset').addEventListener('click', () => {
     $('#filter-module').value = '';
@@ -557,11 +627,11 @@ function bindEvents() {
     }
   });
 
-  // 配置
   $('#btn-refresh-default').addEventListener('click', async () => {
     await ConfigManager.refreshCloud();
     state.cfg = ConfigManager.get();
     refreshConfigPage();
+    renderDimensions(); // 维度可能变了
     toast('已刷新云端默认配置', 'success');
   });
   $('#btn-reset-default').addEventListener('click', () => {
@@ -569,6 +639,7 @@ function bindEvents() {
       ConfigManager.resetToCloud();
       state.cfg = ConfigManager.get();
       refreshConfigPage();
+      renderDimensions();
       toast('已恢复云端默认', 'success');
     }
   });
@@ -577,8 +648,9 @@ function bindEvents() {
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td><input type="text" class="inp-item-name" value="" placeholder="item_name"></td>' +
-      '<td><input type="text" class="inp-item-nvm" value="" placeholder="xxx.nvm"></td>' +
       '<td><input type="text" class="inp-item-def" value="0x0" style="font-family:Consolas,monospace"></td>' +
+      '<td><input type="text" class="inp-item-nvm" value="" placeholder="xxx.nvm"></td>' +
+      '<td><span class="cond-desc">所有（无条件）</span></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
     tr.querySelector('.inp-item-name').focus();
@@ -592,7 +664,7 @@ function bindEvents() {
   });
   $('#btn-save-config').addEventListener('click', () => {
     const newCfg = collectConfigFromForm();
-    if (newCfg.check_items.length === 0) {
+    if (newCfg.items.length === 0) {
       toast('至少保留一个检查项', 'error');
       return;
     }
@@ -600,19 +672,14 @@ function bindEvents() {
     state.cfg = ConfigManager.get();
     toast('配置已保存到本地', 'success');
     refreshConfigPage();
+    renderDimensions();
   });
 
-  // 导出
   $('#btn-exp-search').addEventListener('click', applyExportFilter);
   $('#exp-chk-all').addEventListener('change', (e) => {
     $$('.chk-exp').forEach(c => c.checked = e.target.checked);
-    updateExportActionButton();
-  });
-  $('#export-tbody').addEventListener('change', (e) => {
-    if (e.target.classList.contains('chk-exp')) updateExportActionButton();
   });
   $('#btn-export-all').addEventListener('click', async () => {
-    // 导出当前筛选的全部
     if (state.expFiltered.length === 0) return;
     try {
       const fname = await ExcelExport.exportRecords(state.expFiltered, state.cfg);
@@ -629,23 +696,30 @@ function updateHistActionButtons() {
   $('#btn-export-selected').disabled = cnt === 0;
 }
 
-function updateExportActionButton() {
-  // 导出页"导出全部"是否可用已经在 renderExportTable 控制；
-  // 这里可加选中 N 条时的单独导出按钮，为简洁复用"导出全部"按钮即可。
-}
-
 function showRecordDetail(rec) {
-  // 简易详情弹窗
   const lines = [];
   lines.push('模块型号: ' + rec.module);
   lines.push('检查时间: ' + formatDateTime(rec.timestamp));
   lines.push('总体结果: ' + rec.overall.toUpperCase());
+  if (rec.selection) {
+    lines.push('');
+    lines.push('项目选择:');
+    for (const [k, v] of Object.entries(rec.selection)) {
+      if (v) lines.push('  ' + k + ' = ' + v);
+    }
+  }
   lines.push('');
-  for (const item of state.cfg.check_items) {
-    const r = rec.results[item];
-    if (!r) continue;
-    lines.push(item + ': ' + r.verdict.toUpperCase() +
-      '  (实际=' + (r.raw != null ? r.raw : '未找到') + ', 默认=' + hex(r.default) + ')');
+  if (rec.item_names) {
+    lines.push('检查项 (' + rec.item_names.length + ' 个):');
+    for (const name of rec.item_names) {
+      const r = rec.results ? rec.results[name] : null;
+      if (r) {
+        lines.push('  ' + name + ': ' + r.verdict.toUpperCase() +
+          ' (实际=' + (r.raw != null ? r.raw : '未找到') + ', 默认=' + r.default + ')');
+      } else {
+        lines.push('  ' + name + ': (无结果)');
+      }
+    }
   }
   if (rec.fail_text) {
     lines.push('');
@@ -664,17 +738,15 @@ function showRecordDetail(rec) {
 async function init() {
   bindEvents();
 
-  // 浏览器能力检测
   const warnings = checkBrowserSupport();
   if (warnings.length > 0) {
     warnings.forEach(w => toast(w, 'warning', 6000));
   }
 
-  // 加载配置
   logLine('正在加载配置 ...', 'info');
   try {
     state.cfg = await ConfigManager.init();
-    logLine('配置加载完成（' + state.cfg.check_items.length + ' 个检查项）', 'ok');
+    logLine('配置加载完成（v' + state.cfg.version + '，' + (state.cfg.items || []).length + ' 个检查项，' + (state.cfg.dimensions || []).length + ' 个维度）', 'ok');
     if (ConfigManager.hasLocal()) {
       logLine('使用本地配置覆盖', 'warn');
     } else {
@@ -685,19 +757,20 @@ async function init() {
     state.cfg = ConfigManager.get();
   }
 
-  // 如果之前已授权过串口/选过文件夹，File System Access 不会持久化句柄（刷新丢失），
-  // 但 Serial API 可以通过 getPorts() 看到已授权串口
+  // 渲染项目选择维度
+  renderDimensions();
+
   try {
     const ports = await Serial.listPorts();
     if (ports.length > 0) {
       state.port = ports[0];
       updatePortStatus(true, '已记住');
-      logLine('检测到上次已授权的串口，可直接使用', 'ok');
+      logLine('检测到上次已授权的串口', 'ok');
     }
   } catch (e) { /* ignore */ }
 
   updateRunButton();
-  logLine('就绪。请连接串口并选择项目文件夹后点击"开始检查"。', 'info');
+  logLine('就绪。请选择项目、连接串口、选择文件夹后点击"开始检查"。', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
