@@ -13,7 +13,7 @@ rem  --app= 模式：以"独立应用窗口"打开，无地址栏/标签栏，�
 rem ============================================================
 
 rem ===== 云端 URL（部署后把这一行取消注释，并注释下方本地文件行）=====
-rem set "APP_URL=https://eamon-yang-Quectel.github.io/NvCheckList/"
+rem set "APP_URL=https://FujiwaraC9.github.io/NvCheckListTool/"
 
 rem ===== 本地文件路径（默认）=====
 set "APP_URL=%~dp0index.html"
