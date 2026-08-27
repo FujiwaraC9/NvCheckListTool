@@ -54,6 +54,77 @@ function formatDateTime(ts) {
     ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 }
 
+// ===== 自定义弹窗组件（不使用浏览器原生 alert/confirm）=====
+
+/**
+ * 基础 modal。
+ * @param {object} opts { title, icon ('info'|'warn'|'error'), bodyHtml, buttons: [{text, class, value}], allowBackdropClose, onMount(overlay, close) }
+ * @returns {Promise<any>} resolve 为所点按钮的 value；点遮罩/ESC 关闭时 resolve 为 undefined
+ */
+function showModal(opts) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const btnHtml = (opts.buttons || [{ text: '确定', class: 'btn-primary', value: true }])
+      .map((b, i) => '<button class="btn ' + (b.class || '') + '" data-btn-value="' + i + '">' + escapeHtml(b.text) + '</button>')
+      .join('');
+    overlay.innerHTML =
+      '<div class="modal-box">' +
+      '<div class="modal-header"><span class="modal-icon ' + (opts.icon || 'info') + '">' +
+      (opts.icon === 'error' ? '✕' : opts.icon === 'warn' ? '!' : 'i') + '</span>' +
+      '<span class="modal-title">' + escapeHtml(opts.title || '提示') + '</span></div>' +
+      '<div class="modal-body">' + (opts.bodyHtml || '') + '</div>' +
+      '<div class="modal-footer">' + btnHtml + '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+
+    const close = (value) => {
+      overlay.classList.remove('show');
+      setTimeout(() => overlay.remove(), 200);
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay && opts.allowBackdropClose !== false) close(undefined);
+      const btn = e.target.closest('[data-btn-value]');
+      if (btn) {
+        const idx = parseInt(btn.dataset.btnValue);
+        close((opts.buttons || [{ value: true }])[idx].value);
+      }
+    });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(undefined);
+      if (e.key === 'Enter') {
+        const btns = opts.buttons || [{ value: true }];
+        close(btns[btns.length - 1].value);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    // 自动聚焦第一个按钮
+    const firstBtn = overlay.querySelector('.modal-footer .btn');
+    if (firstBtn) firstBtn.focus();
+    // 自定义挂载回调（列表项点击等）
+    if (typeof opts.onMount === 'function') opts.onMount(overlay, close);
+  });
+}
+
+/** 提示弹窗 */
+function modalAlert(msg, title = '提示', icon = 'warn') {
+  return showModal({ title, icon, bodyHtml: escapeHtml(msg) });
+}
+
+/** 确认弹窗，返回 true/false */
+function modalConfirm(msg, title = '确认') {
+  return showModal({
+    title, icon: 'warn', bodyHtml: escapeHtml(msg),
+    buttons: [
+      { text: '取消', class: '', value: false },
+      { text: '确定', class: 'btn-primary', value: true },
+    ],
+  });
+}
+
 // ===== 导航切换 =====
 function switchPage(pageName) {
   $$('.page').forEach(p => p.classList.remove('active'));
@@ -227,8 +298,8 @@ function updateMatchedItems() {
 function updatePortStatus(connected, name) {
   const val = $('#status-port .status-value');
   val.className = 'status-value ' + (connected ? 'connected' : 'disconnected');
-  val.innerHTML = '<span class="dot"></span>' + (connected ? '已连接 ' + name : '未连接');
-  $('#btn-connect-port').textContent = connected ? '重新连接' : '连接串口';
+  val.innerHTML = '<span class="dot"></span>' + (connected ? (name || '已连接') : '未连接');
+  $('#btn-connect-port').textContent = connected ? '断开连接' : '连接串口';
   updateRunButton();
 }
 
@@ -252,24 +323,106 @@ function updateRunButton() {
 }
 
 /**
- * 连接串口：选口 → 自动发 AT+QGMR / AT+CGMR 读取平台与基线
+ * 串口连接/断开 切换入口
  */
 async function connectPort() {
+  if (state.port) {
+    // 已连接 → 断开
+    await disconnectPort();
+    return;
+  }
   if (!Serial.isSupported()) {
-    toast('当前浏览器不支持 Web Serial API，请使用 Chrome/Edge。', 'error');
+    await modalAlert('当前浏览器不支持 Web Serial API，请使用 Chrome/Edge 桌面版。', '无法连接串口', 'error');
     return;
   }
   try {
-    const port = await Serial.requestPort(state.cfg.serial.port_keyword);
+    const port = await choosePort();
+    if (!port) return; // 用户取消
     state.port = port;
-    updatePortStatus(true, '已选择');
-    logLine('串口已选择，正在自动读取平台名和基线版本 ...', 'ok');
-    toast('串口已选择', 'success');
+    updatePortStatus(true, '已连接');
+    logLine('串口已连接，正在自动读取平台名、安卓版本和基线版本 ...', 'ok');
+    toast('串口已连接', 'success');
     await autoReadDimensions();
   } catch (e) {
-    toast('串口选择失败: ' + e.message, 'error');
-    logLine('串口选择失败: ' + e.message, 'err');
+    await modalAlert('串口连接失败: ' + e.message, '错误', 'error');
+    logLine('串口连接失败: ' + e.message, 'err');
   }
+}
+
+/** 断开串口 */
+async function disconnectPort() {
+  try {
+    if (state.port) {
+      await Serial.close(state.port);
+    }
+  } catch (e) { /* ignore */ }
+  state.port = null;
+  // 清空自动读取的维度值（保留手选的安卓版本/分支）
+  const dims = ConfigManager.getDimensions();
+  for (const d of dims) {
+    if (d.auto_read) state.selection[d.key] = '';
+  }
+  updatePortStatus(false, '');
+  syncDimensionUI();
+  updateMatchedItems();
+  logLine('串口已断开', 'info');
+  toast('串口已断开', 'info');
+}
+
+/**
+ * 自定义串口选择弹窗（不用浏览器原生选择框）。
+ * 优先列出已授权串口供选择；需要新授权时才调用浏览器原生 requestPort（系统安全要求，仅首次）。
+ * @returns {SerialPort|null}
+ */
+async function choosePort() {
+  const known = await Serial.listPorts();
+  const items = [];
+
+  if (known.length > 0) {
+    known.forEach((p, i) => {
+      const info = p.getInfo ? p.getInfo() : {};
+      const usb = info.usbVendorId != null
+        ? ('USB VID:' + info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() +
+           ' PID:' + (info.usbProductId || 0).toString(16).padStart(4, '0').toUpperCase())
+        : '串口设备';
+      items.push(
+        '<li class="modal-list-item" data-port-idx="' + i + '">' +
+        '<span class="list-icon">🔌</span>' +
+        '<span class="list-main"><span class="list-title">已授权串口 ' + (i + 1) + '</span>' +
+        '<span class="list-sub">' + escapeHtml(usb) + '</span></span></li>');
+    });
+  }
+  items.push(
+    '<li class="modal-list-item" data-port-idx="new">' +
+    '<span class="list-icon">＋</span>' +
+    '<span class="list-main"><span class="list-title">授权新串口…</span>' +
+    '<span class="list-sub">首次使用需通过浏览器授权弹窗选择设备</span></span></li>');
+
+  const result = await showModal({
+    title: '选择 AT 串口（设备名含 ' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '）',
+    icon: 'info',
+    bodyHtml: '<ul class="modal-list">' + items.join('') + '</ul>',
+    buttons: [{ text: '取消', class: '', value: null }],
+    onMount: (overlay, close) => {
+      overlay.querySelectorAll('[data-port-idx]').forEach(li => {
+        li.addEventListener('click', () => {
+          const idx = li.dataset.portIdx;
+          close(idx === 'new' ? 'new' : known[parseInt(idx)]);
+        });
+      });
+    },
+  });
+
+  if (result === 'new') {
+    // 首次授权必须走浏览器原生弹窗（Web Serial API 安全限制，无法绕过）
+    try {
+      return await Serial.requestPort(state.cfg.serial.port_keyword);
+    } catch (e) {
+      if (e.name === 'NotFoundError') return null;
+      throw e;
+    }
+  }
+  return result || null;
 }
 
 /**
@@ -324,22 +477,75 @@ async function autoReadDimensions() {
   updateMatchedItems();
 }
 
+/**
+ * 选择项目文件夹（带记忆 + 恢复）
+ * - 上次选的文件夹若权限仍在（同次会话/浏览器重开），自动加载
+ * - 权限需重新确认时，弹自定义弹窗询问：恢复上次 / 重新选择
+ * - showDirectoryPicker 传 startIn 定位到上次目录，加快资源管理器打开速度
+ */
 async function selectFolder() {
   if (!('showDirectoryPicker' in window)) {
-    toast('当前浏览器不支持文件夹选择，请使用 Chrome/Edge。', 'error');
+    await modalAlert('当前浏览器不支持文件夹选择，请使用 Chrome/Edge 桌面版。', '无法选择文件夹', 'error');
     return;
   }
   try {
-    const handle = await window.showDirectoryPicker();
-    await handle.requestPermission({ mode: 'read' });
+    let handle = null;
+    const last = await DB.getPref('lastDir');
+    if (last) {
+      // 尝试恢复上次文件夹
+      let perm = 'denied';
+      try { perm = await last.queryPermission({ mode: 'read' }); } catch (e) { /* handle 失效 */ }
+      if (perm === 'granted') {
+        handle = last;
+      } else if (perm === 'prompt') {
+        // 需要用户手势确认，弹自定义弹窗询问
+        const choice = await showModal({
+          title: '恢复上次的文件夹？',
+          icon: 'info',
+          bodyHtml: '上次选择的文件夹：<b>' + escapeHtml(last.name || '') + '</b><br>是否直接恢复使用？',
+          buttons: [
+            { text: '重新选择', class: '', value: 'new' },
+            { text: '恢复上次', class: 'btn-primary', value: 'recover' },
+          ],
+        });
+        if (choice === 'recover') {
+          try {
+            const p = await last.requestPermission({ mode: 'read' });
+            if (p === 'granted') handle = last;
+          } catch (e) { /* ignore */ }
+        }
+      }
+    }
+    if (!handle) {
+      // 打开系统选择器（startIn 定位上次目录，加快弹窗速度）
+      const opts = {};
+      try {
+        if (last && last.name) opts.startIn = last;
+      } catch (e) { /* ignore */ }
+      const btn = $('#btn-select-folder');
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = '正在打开…';
+      try {
+        handle = await window.showDirectoryPicker(opts);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+      if (!handle) return;
+      try {
+        await handle.requestPermission({ mode: 'read' });
+      } catch (e) { /* ignore */ }
+    }
     state.dirHandle = handle;
     state.dirName = handle.name;
+    await DB.setPref('lastDir', handle);
     updateFolderStatus(true, handle.name);
     logLine('项目文件夹已选择: ' + handle.name, 'ok');
     toast('项目文件夹已选择', 'success');
   } catch (e) {
     if (e.name !== 'AbortError') {
-      toast('选择文件夹失败: ' + e.message, 'error');
+      await modalAlert('选择文件夹失败: ' + e.message, '错误', 'error');
       logLine('选择文件夹失败: ' + e.message, 'err');
     }
   }
@@ -363,12 +569,36 @@ function baselineKind(baseline) {
 async function runCheck() {
   $('#btn-run-check').disabled = true;
   $('#result-card').style.display = 'none';
+
+  // ===== 前置校验（自定义弹窗提醒，不用浏览器原生）=====
+  const missing = [];
+  const dims = ConfigManager.getDimensions();
+  for (const d of dims) {
+    if (d.options || d.options_by) { // 有选项的维度必选
+      if (!state.selection[d.key]) missing.push(d.label);
+    }
+  }
+  if (missing.length > 0) {
+    await modalAlert('请先选择：' + missing.join('、') + '，未选择不能开始检测。', '无法开始检测', 'warn');
+    updateRunButton();
+    return;
+  }
+  if (!state.port) {
+    await modalAlert('请先连接串口，未连接不能开始检测。', '无法开始检测', 'warn');
+    updateRunButton();
+    return;
+  }
+  if (!state.dirHandle) {
+    await modalAlert('请先选择项目文件夹，未选择不能开始检测。', '无法开始检测', 'warn');
+    updateRunButton();
+    return;
+  }
+
   const panel = $('#log-panel');
   panel.innerHTML = '';
   logLine('开始执行检查 ...', 'step');
 
-  // 打印当前选择
-  const dims = ConfigManager.getDimensions();
+  // 打印当前选择（dims 已在前面校验时获取）
   const selDesc = dims.map(d => d.label + '=' + (state.selection[d.key] || '未选')).join('，');
   logLine('项目选择: ' + selDesc, 'info');
 
@@ -377,7 +607,7 @@ async function runCheck() {
   const kind = baselineKind(baseline);
   if (!kind) {
     logLine('基线版本未获取（自动读取失败且未手动填写），无法确定检查文件类型，终止', 'err');
-    toast('请先获取/填写基线版本', 'error', 4000);
+    await modalAlert('基线版本未获取（自动读取失败且未手动填写），无法确定检查文件类型。', '无法开始检测', 'warn');
     updateRunButton();
     return;
   }
@@ -794,7 +1024,7 @@ function bindEvents() {
     if (!btn) return;
     const id = parseInt(btn.dataset.id);
     if (btn.dataset.action === 'delete') {
-      if (confirm('确定删除这条记录吗？')) {
+      if (await modalConfirm('确定删除这条记录吗？')) {
         await DB.deleteRecords([id]);
         toast('已删除', 'success');
         applyHistoryFilter();
@@ -807,7 +1037,7 @@ function bindEvents() {
   $('#btn-delete-selected').addEventListener('click', async () => {
     const ids = getCheckedIds('chk-hist');
     if (ids.length === 0) return;
-    if (confirm('确定删除选中的 ' + ids.length + ' 条记录吗？')) {
+    if (await modalConfirm('确定删除选中的 ' + ids.length + ' 条记录吗？')) {
       await DB.deleteRecords(ids);
       toast('已删除 ' + ids.length + ' 条', 'success');
       applyHistoryFilter();
@@ -832,8 +1062,8 @@ function bindEvents() {
     renderDimensions();
     toast('已刷新云端默认配置', 'success');
   });
-  $('#btn-reset-default').addEventListener('click', () => {
-    if (confirm('确定恢复云端默认配置吗？本地修改将全部丢失。')) {
+  $('#btn-reset-default').addEventListener('click', async () => {
+    if (await modalConfirm('确定恢复云端默认配置吗？本地修改将全部丢失。')) {
       ConfigManager.resetToCloud();
       state.cfg = ConfigManager.get();
       refreshConfigPage();
@@ -855,9 +1085,9 @@ function bindEvents() {
     tbody.appendChild(tr);
     tr.querySelector('.inp-item-name').focus();
   });
-  $('#items-tbody').addEventListener('click', (e) => {
+  $('#items-tbody').addEventListener('click', async (e) => {
     if (e.target.classList.contains('btn-remove-item')) {
-      if (confirm('确定删除这个检查项吗？')) {
+      if (await modalConfirm('确定删除这个检查项吗？')) {
         e.target.closest('tr').remove();
       }
     }
@@ -896,7 +1126,7 @@ function updateHistActionButtons() {
   $('#btn-export-selected').disabled = cnt === 0;
 }
 
-function showRecordDetail(rec) {
+async function showRecordDetail(rec) {
   const lines = [];
   lines.push('模块型号: ' + rec.module);
   lines.push('检查时间: ' + formatDateTime(rec.timestamp));
@@ -939,7 +1169,12 @@ function showRecordDetail(rec) {
     lines.push('AT+QFSGVERSION? 响应:');
     lines.push(rec.at_version);
   }
-  alert(lines.join('\n'));
+  await showModal({
+    title: '检查记录详情',
+    icon: rec.overall === 'pass' ? 'info' : 'error',
+    bodyHtml: '<div class="modal-pre">' + escapeHtml(lines.join('\n')) + '</div>',
+    buttons: [{ text: '关闭', class: 'btn-primary', value: true }],
+  });
 }
 
 // ===== 初始化 =====
@@ -969,17 +1204,25 @@ async function init() {
   Object.assign(state.selection, ConfigManager.getDefaultSelection());
   renderDimensions();
 
+  // 自动恢复上次的项目文件夹（仅当权限仍然有效时；权限失效则等用户点击选择时再询问）
   try {
-    const ports = await Serial.listPorts();
-    if (ports.length > 0) {
-      state.port = ports[0];
-      updatePortStatus(true, '已记住');
-      logLine('检测到上次已授权的串口，可点击"重新连接"读取平台/基线', 'ok');
+    const last = await DB.getPref('lastDir');
+    if (last) {
+      let perm = 'denied';
+      try { perm = await last.queryPermission({ mode: 'read' }); } catch (e) { /* handle 失效 */ }
+      if (perm === 'granted') {
+        state.dirHandle = last;
+        state.dirName = last.name;
+        updateFolderStatus(true, last.name);
+        logLine('已自动恢复上次的文件夹: ' + last.name, 'ok');
+      } else {
+        logLine('上次文件夹: ' + (last.name || '') + '（点击"选择文件夹"可恢复或重选）', 'info');
+      }
     }
   } catch (e) { /* ignore */ }
 
   updateRunButton();
-  logLine('就绪。请连接串口（自动读取平台/基线）、选择安卓版本和分支、选择文件夹后点击"开始检查"。', 'info');
+  logLine('就绪。请点击"连接串口"（自动读取平台/安卓版本/基线）、选择分支、选择文件夹后点击"开始检查"。', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
