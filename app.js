@@ -435,7 +435,7 @@ async function choosePort() {
     const result = await showModal({
       title: '选择 AT 串口',
       icon: 'info',
-      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:#64748b">请选择展锐 AT 串口（通常是 Unisoc Phone 设备名）：</p>' +
+      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:var(--text-secondary)">请选择展锐 AT 串口（通常是 Unisoc Phone 设备名）：</p>' +
         '<ul class="modal-list">' + items.join('') + '</ul>',
       buttons: [{ text: '取消', class: '', value: null }],
       onMount: (overlay, close) => {
@@ -475,7 +475,7 @@ async function requestPortWithGuide() {
       '<li>如果有多个 Unisoc Phone 端口，请逐个尝试（AT 口通常是最后一个或倒数第二个）</li>' +
       '<li>选中后点击"连接"按钮授权</li>' +
       '</ol>' +
-      '<p style="margin-top:10px;font-size:13px;color:#92400e">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
+      '<p style="margin-top:10px;font-size:13px;color:var(--warn-title)">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
     buttons: [
       { text: '取消', class: '', value: false },
       { text: '去选择', class: 'btn-primary', value: true },
@@ -807,11 +807,11 @@ function showResultCard(rec, activeItems) {
       actual = escapeHtml(r.reason || '跳过');
       fileCell = '-';
     } else if (r.raw == null) {
-      actual = '<span style="color:#dc2626">未找到</span>';
+      actual = '<span style="color:var(--fail)">未找到</span>';
       fileCell = escapeHtml(r.file || '-');
     } else {
       const mismatch = r.verdict === 'fail';
-      actual = (mismatch ? '<span style="color:#dc2626;font-weight:600">' : '') + escapeHtml(r.raw) + (mismatch ? '</span>' : '');
+      actual = (mismatch ? '<span style="color:var(--fail);font-weight:600">' : '') + escapeHtml(r.raw) + (mismatch ? '</span>' : '');
       fileCell = escapeHtml(r.file || '-');
     }
 
@@ -862,7 +862,7 @@ function renderHistoryTable() {
   const pageData = state.historyFiltered.slice(start, start + pageSize);
 
   if (pageData.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:30px">暂无记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:30px">暂无记录</td></tr>';
   } else {
     pageData.forEach(rec => {
       const tr = document.createElement('tr');
@@ -870,7 +870,7 @@ function renderHistoryTable() {
       const selText = rec.selection ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，') : '';
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
-        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:12px;color:#9ca3af">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
+        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:12px;color:var(--text-muted)">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
         '<td><span class="cell-' + rec.overall + '">' + rec.overall.toUpperCase() + '</span></td>' +
         '<td class="cell-fail-text">' + escapeHtml(rec.fail_text || '-') + '</td>' +
         '<td>' + formatDateTime(rec.timestamp) + '</td>' +
@@ -1017,7 +1017,7 @@ function renderExportTable() {
   $('#btn-export-all').disabled = list.length === 0;
   $('#exp-chk-all').checked = false;
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:30px">暂无记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:30px">暂无记录</td></tr>';
     return;
   }
   list.forEach(rec => {
