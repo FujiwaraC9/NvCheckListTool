@@ -342,6 +342,13 @@ async function connectPort() {
     updatePortStatus(true, '已连接');
     logLine('串口已连接，正在自动读取平台名、安卓版本和基线版本 ...', 'ok');
     toast('串口已连接', 'success');
+    // 记住端口信息用于下次标记"上次使用"
+    try {
+      const info = port.getInfo ? port.getInfo() : {};
+      if (info.usbVendorId != null) {
+        await DB.setPref('lastPortInfo', { vid: info.usbVendorId, pid: info.usbProductId || 0 });
+      }
+    } catch (e) { /* ignore */ }
     await autoReadDimensions();
   } catch (e) {
     await modalAlert('串口连接失败: ' + e.message, '错误', 'error');
@@ -370,59 +377,102 @@ async function disconnectPort() {
 }
 
 /**
- * 自定义串口选择弹窗（不用浏览器原生选择框）。
- * 优先列出已授权串口供选择；需要新授权时才调用浏览器原生 requestPort（系统安全要求，仅首次）。
+ * 自定义串口选择弹窗。
+ * - 有已授权串口：弹自定义列表供选择（不触发浏览器弹窗）
+ * - 无已授权串口（首次）：先弹自定义引导说明，用户确认后才调用浏览器 requestPort（浏览器安全限制，无法绕过）
+ * 连接成功后记住端口 VID/PID，下次在列表中标记"上次使用"。
  * @returns {SerialPort|null}
  */
 async function choosePort() {
   const known = await Serial.listPorts();
-  const items = [];
 
+  // 有已授权端口 → 自定义列表选择
   if (known.length > 0) {
+    const lastPortInfo = await DB.getPref('lastPortInfo').catch(() => null);
+    const items = [];
     known.forEach((p, i) => {
       const info = p.getInfo ? p.getInfo() : {};
       const usb = info.usbVendorId != null
         ? ('USB VID:' + info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() +
            ' PID:' + (info.usbProductId || 0).toString(16).padStart(4, '0').toUpperCase())
         : '串口设备';
+      const isLast = lastPortInfo && info.usbVendorId === lastPortInfo.vid && info.usbProductId === lastPortInfo.pid;
       items.push(
-        '<li class="modal-list-item" data-port-idx="' + i + '">' +
+        '<li class="modal-list-item' + (isLast ? ' selected' : '') + '" data-port-idx="' + i + '">' +
         '<span class="list-icon">🔌</span>' +
-        '<span class="list-main"><span class="list-title">已授权串口 ' + (i + 1) + '</span>' +
+        '<span class="list-main"><span class="list-title">串口 ' + (i + 1) + (isLast ? '（上次使用）' : '') + '</span>' +
         '<span class="list-sub">' + escapeHtml(usb) + '</span></span></li>');
     });
-  }
-  items.push(
-    '<li class="modal-list-item" data-port-idx="new">' +
-    '<span class="list-icon">＋</span>' +
-    '<span class="list-main"><span class="list-title">授权新串口…</span>' +
-    '<span class="list-sub">首次使用需通过浏览器授权弹窗选择设备</span></span></li>');
+    items.push(
+      '<li class="modal-list-item" data-port-idx="new">' +
+      '<span class="list-icon">＋</span>' +
+      '<span class="list-main"><span class="list-title">授权其他串口…</span>' +
+      '<span class="list-sub">需要通过浏览器授权弹窗选择新设备</span></span></li>');
 
-  const result = await showModal({
-    title: '选择 AT 串口（设备名含 ' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '）',
-    icon: 'info',
-    bodyHtml: '<ul class="modal-list">' + items.join('') + '</ul>',
-    buttons: [{ text: '取消', class: '', value: null }],
-    onMount: (overlay, close) => {
-      overlay.querySelectorAll('[data-port-idx]').forEach(li => {
-        li.addEventListener('click', () => {
-          const idx = li.dataset.portIdx;
-          close(idx === 'new' ? 'new' : known[parseInt(idx)]);
+    const result = await showModal({
+      title: '选择 AT 串口',
+      icon: 'info',
+      bodyHtml: '<p style="margin-bottom:10px;font-size:12px;color:#64748b">请选择设备名含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口：</p>' +
+        '<ul class="modal-list">' + items.join('') + '</ul>',
+      buttons: [{ text: '取消', class: '', value: null }],
+      onMount: (overlay, close) => {
+        overlay.querySelectorAll('[data-port-idx]').forEach(li => {
+          li.addEventListener('click', () => {
+            const idx = li.dataset.portIdx;
+            close(idx === 'new' ? 'new' : known[parseInt(idx)]);
+          });
         });
-      });
-    },
-  });
+      },
+    });
 
-  if (result === 'new') {
-    // 首次授权必须走浏览器原生弹窗（Web Serial API 安全限制，无法绕过）
-    try {
-      return await Serial.requestPort(state.cfg.serial.port_keyword);
-    } catch (e) {
-      if (e.name === 'NotFoundError') return null;
-      throw e;
+    if (result === 'new') {
+      // 用户选择"授权其他串口"→ 先弹引导说明，再调用浏览器弹窗
+      return await requestPortWithGuide();
     }
+    return result || null;
   }
-  return result || null;
+
+  // 无已授权端口（首次使用）→ 弹自定义引导说明
+  return await requestPortWithGuide();
+}
+
+/**
+ * 弹出自定义引导说明，用户确认后才触发浏览器原生串口授权弹窗。
+ * 这是 Web Serial API 的安全限制：首次授权必须由用户手势触发且浏览器弹出选择框，网页无法绕过。
+ * @returns {SerialPort|null}
+ */
+async function requestPortWithGuide() {
+  const confirmed = await showModal({
+    title: '授权串口',
+    icon: 'info',
+    bodyHtml:
+      '<p>即将弹出浏览器的串口授权窗口，请按以下步骤操作：</p>' +
+      '<ol style="margin:8px 0 0 20px;padding:0;font-size:13px;line-height:1.8">' +
+      '<li>在弹出的列表中，选择名称包含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口（通常是 Unisoc Phone）</li>' +
+      '<li>如果有多个 Unisoc Phone 端口，请逐个尝试（AT 口通常是最后一个或倒数第二个）</li>' +
+      '<li>选中后点击"连接"按钮授权</li>' +
+      '</ol>' +
+      '<p style="margin-top:10px;font-size:12px;color:#92400e">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
+    buttons: [
+      { text: '取消', class: '', value: false },
+      { text: '去选择', class: 'btn-primary', value: true },
+    ],
+  });
+  if (!confirmed) return null;
+  try {
+    const port = await Serial.requestPort(state.cfg.serial.port_keyword);
+    // 记住端口信息
+    if (port) {
+      const info = port.getInfo ? port.getInfo() : {};
+      if (info.usbVendorId != null) {
+        await DB.setPref('lastPortInfo', { vid: info.usbVendorId, pid: info.usbProductId || 0 }).catch(() => {});
+      }
+    }
+    return port;
+  } catch (e) {
+    if (e.name === 'NotFoundError') return null;
+    throw e;
+  }
 }
 
 /**
