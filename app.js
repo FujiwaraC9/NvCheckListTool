@@ -412,7 +412,7 @@ async function choosePort() {
     const result = await showModal({
       title: '选择 AT 串口',
       icon: 'info',
-      bodyHtml: '<p style="margin-bottom:10px;font-size:12px;color:#64748b">请选择设备名含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口：</p>' +
+      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:#64748b">请选择设备名含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口：</p>' +
         '<ul class="modal-list">' + items.join('') + '</ul>',
       buttons: [{ text: '取消', class: '', value: null }],
       onMount: (overlay, close) => {
@@ -447,12 +447,12 @@ async function requestPortWithGuide() {
     icon: 'info',
     bodyHtml:
       '<p>即将弹出浏览器的串口授权窗口，请按以下步骤操作：</p>' +
-      '<ol style="margin:8px 0 0 20px;padding:0;font-size:13px;line-height:1.8">' +
+      '<ol style="margin:8px 0 0 20px;padding:0;font-size:14px;line-height:1.8">' +
       '<li>在弹出的列表中，选择名称包含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口（通常是 Unisoc Phone）</li>' +
       '<li>如果有多个 Unisoc Phone 端口，请逐个尝试（AT 口通常是最后一个或倒数第二个）</li>' +
       '<li>选中后点击"连接"按钮授权</li>' +
       '</ol>' +
-      '<p style="margin-top:10px;font-size:12px;color:#92400e">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
+      '<p style="margin-top:10px;font-size:13px;color:#92400e">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
     buttons: [
       { text: '取消', class: '', value: false },
       { text: '去选择', class: 'btn-primary', value: true },
@@ -876,7 +876,7 @@ function renderHistoryTable() {
       const selText = rec.selection ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，') : '';
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
-        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:11px;color:#9ca3af">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
+        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:12px;color:#9ca3af">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
         '<td><span class="cell-' + rec.overall + '">' + rec.overall.toUpperCase() + '</span></td>' +
         '<td class="cell-fail-text">' + escapeHtml(rec.fail_text || '-') + '</td>' +
         '<td>' + formatDateTime(rec.timestamp) + '</td>' +
@@ -964,7 +964,7 @@ function renderItemsTable(cfg) {
       '<td><input type="text" class="inp-item-fm" value="' + escapeHtml(files.fm || '') + '" placeholder="不关注可留空"></td>' +
       '<td><input type="text" class="inp-item-xml" value="' + escapeHtml(files.xml || '') + '" placeholder="不关注可留空"></td>' +
       '<td>' + formatConditions(item.conditions) + '</td>' +
-      '<td><input type="text" class="inp-item-note" value="' + escapeHtml(item.note || '') + '" placeholder="无备注" style="font-size:11px"></td>' +
+      '<td><input type="text" class="inp-item-note" value="' + escapeHtml(item.note || '') + '" placeholder="无备注" style="font-size:12px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
   });
@@ -1130,7 +1130,7 @@ function bindEvents() {
       '<td><input type="text" class="inp-item-fm" value="" placeholder="不关注可留空"></td>' +
       '<td><input type="text" class="inp-item-xml" value="" placeholder="不关注可留空"></td>' +
       '<td><span class="cond-desc">所有（无条件）</span></td>' +
-      '<td><input type="text" class="inp-item-note" value="" placeholder="无备注" style="font-size:11px"></td>' +
+      '<td><input type="text" class="inp-item-note" value="" placeholder="无备注" style="font-size:12px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
     tr.querySelector('.inp-item-name').focus();
