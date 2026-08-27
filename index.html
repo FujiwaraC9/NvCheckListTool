@@ -82,7 +82,21 @@
             <div class="meta-item"><span class="meta-label">模块型号</span><span id="result-module" class="meta-value">--</span></div>
             <div class="meta-item"><span class="meta-label">检查时间</span><span id="result-time" class="meta-value">--</span></div>
           </div>
-          <div class="result-items" id="result-items"></div>
+          <div class="table-wrap">
+            <table class="data-table result-table" id="result-items">
+              <thead>
+                <tr>
+                  <th style="width:180px">检查项</th>
+                  <th style="width:100px">期望值</th>
+                  <th style="width:120px">实际值</th>
+                  <th style="width:80px">结果</th>
+                  <th style="width:240px">文件</th>
+                  <th>备注</th>
+                </tr>
+              </thead>
+              <tbody id="result-tbody"></tbody>
+            </table>
+          </div>
           <div class="result-at" id="result-at-box" style="display:none">
             <div class="meta-label">AT+QFSGVERSION?</div>
             <pre class="at-content" id="result-at"></pre>

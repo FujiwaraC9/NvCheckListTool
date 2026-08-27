@@ -273,40 +273,51 @@ async function connectPort() {
 }
 
 /**
- * 连接串口后自动读取：平台（AT+QGMR）、基线（AT+CGMR）
+ * 连接串口后自动读取：平台（AT+QGMR）、安卓版本（AT+QGMR）、基线（AT+CGMR）
+ * 同一 AT 命令只发一次，响应缓存复用。
  */
 async function autoReadDimensions() {
   const dims = ConfigManager.getDimensions();
   const ser = state.cfg.serial;
+  const respCache = {}; // command -> respText
 
   for (const d of dims) {
     if (!d.auto_read || !d.auto_read.command) continue;
     const cmd = d.auto_read.command;
-    try {
-      logLine('发送 ' + cmd + ' ...', 'info');
-      const resp = await Serial.sendAT(state.port, cmd, {
-        baudrate: ser.baudrate,
-        timeout_ms: ser.response_timeout_ms,
-      });
-      // 原始响应去掉回显和空行后打日志
-      const respLines = resp.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.toUpperCase().startsWith('AT+' + cmd.slice(3)));
-      if (respLines.length > 0) {
-        logLine('  ' + cmd + ' 响应: ' + respLines.join(' | ').substring(0, 300), 'info');
+    let resp = respCache[cmd];
+    if (resp === undefined) {
+      try {
+        logLine('发送 ' + cmd + ' ...', 'info');
+        resp = await Serial.sendAT(state.port, cmd, {
+          baudrate: ser.baudrate,
+          timeout_ms: ser.response_timeout_ms,
+        });
+        respCache[cmd] = resp;
+        const respLines = resp.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.toUpperCase().startsWith('AT+' + cmd.slice(3)));
+        if (respLines.length > 0) {
+          logLine('  ' + cmd + ' 响应: ' + respLines.join(' | ').substring(0, 300), 'info');
+        }
+      } catch (e) {
+        logLine('  ' + cmd + ' 查询失败: ' + e.message, 'err');
+        respCache[cmd] = null;
+        continue;
       }
-      let value = null;
-      if (d.key === 'platform') {
-        value = Serial.parseQgmr(resp, d.options || []);
-      } else if (d.key === 'baseline') {
-        value = Serial.parseCgmr(resp);
-      }
-      if (value) {
-        state.selection[d.key] = value;
-        logLine('  解析到 ' + d.label + ': ' + value, 'ok');
-      } else {
-        logLine('  未能从 ' + cmd + ' 响应中解析 ' + d.label + '，请手动选择/填写', 'warn');
-      }
-    } catch (e) {
-      logLine('  ' + cmd + ' 查询失败: ' + e.message, 'err');
+    }
+    if (resp == null) continue;
+
+    let value = null;
+    if (d.key === 'platform') {
+      value = Serial.parseQgmr(resp, d.options || []);
+    } else if (d.key === 'android_version') {
+      value = Serial.parseAndroidVersion(resp, d.options || []);
+    } else if (d.key === 'baseline') {
+      value = Serial.parseCgmr(resp);
+    }
+    if (value) {
+      state.selection[d.key] = value;
+      logLine('  解析到 ' + d.label + ': ' + value, 'ok');
+    } else {
+      logLine('  未能从 ' + cmd + ' 响应中解析 ' + d.label + '，请手动选择/填写', 'warn');
     }
   }
   syncDimensionUI();
@@ -508,27 +519,36 @@ function showResultCard(rec, activeItems) {
   $('#result-module').textContent = rec.module;
   $('#result-time').textContent = formatDateTime(rec.timestamp);
 
-  const itemsBox = $('#result-items');
-  itemsBox.innerHTML = '';
+  const tbody = $('#result-tbody');
+  tbody.innerHTML = '';
   (activeItems || []).forEach(item => {
     const r = rec.results[item.name] || { verdict: 'skip' };
-    const chip = document.createElement('div');
-    const cls = r.verdict === 'skip' ? 'pass' : r.verdict;
-    chip.className = 'result-chip ' + cls;
+    const tr = document.createElement('tr');
+    tr.className = 'row-' + r.verdict;
+
+    const expect = escapeHtml(item.default);
+    let actual;
+    let fileCell;
     if (r.verdict === 'skip') {
-      chip.style.opacity = '0.5';
-      chip.style.background = '#f3f4f6';
-      chip.style.borderColor = '#e5e7eb';
-      chip.style.color = '#6b7280';
+      actual = escapeHtml(r.reason || '跳过');
+      fileCell = '-';
+    } else if (r.raw == null) {
+      actual = '<span style="color:#dc2626">未找到</span>';
+      fileCell = escapeHtml(r.file || '-');
+    } else {
+      const mismatch = r.verdict === 'fail';
+      actual = (mismatch ? '<span style="color:#dc2626;font-weight:600">' : '') + escapeHtml(r.raw) + (mismatch ? '</span>' : '');
+      fileCell = escapeHtml(r.file || '-');
     }
-    const noteHtml = item.note ? '<div class="chip-note-inline">ⓘ ' + escapeHtml(item.note) + '</div>' : '';
-    const valText = r.reason
-      ? escapeHtml(r.reason)
-      : '实际=' + escapeHtml(r.raw != null ? r.raw : '未找到') + '  默认=' + escapeHtml(item.default) +
-        (r.file ? '  [' + escapeHtml(r.file) + ']' : '');
-    chip.innerHTML = '<div class="chip-name">' + escapeHtml(item.name) + ' <b>' + r.verdict.toUpperCase() + '</b></div>' +
-      '<div class="chip-val">' + valText + '</div>' + noteHtml;
-    itemsBox.appendChild(chip);
+
+    tr.innerHTML =
+      '<td class="mono">' + escapeHtml(item.name) + '</td>' +
+      '<td class="mono">' + expect + '</td>' +
+      '<td class="mono">' + actual + '</td>' +
+      '<td class="result-verdict ' + r.verdict + '">' + r.verdict.toUpperCase() + '</td>' +
+      '<td class="result-file">' + fileCell + '</td>' +
+      '<td class="result-note">' + escapeHtml(item.note || '') + '</td>';
+    tbody.appendChild(tr);
   });
 
   if (rec.at_version) {

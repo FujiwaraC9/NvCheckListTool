@@ -195,19 +195,20 @@ body {
 .badge.pass { background: #dcfce7; color: #166534; }
 .badge.fail { background: #fee2e2; color: #991b1b; }
 
-.result-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
-.result-chip {
-  padding: 10px 14px;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-}
-.result-chip.pass { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
-.result-chip.fail { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-.chip-name { font-weight: 500; }
-.chip-val { font-size: 12px; opacity: 0.8; font-family: "Consolas", monospace; }
+/* 结果表格行颜色 */
+.result-table tbody tr.row-pass { background: #f0fdf4; }
+.result-table tbody tr.row-pass:hover { background: #dcfce7; }
+.result-table tbody tr.row-fail { background: #fef2f2; }
+.result-table tbody tr.row-fail:hover { background: #fee2e2; }
+.result-table tbody tr.row-skip { background: #f8fafc; color: #9ca3af; }
+.result-table tbody tr.row-skip:hover { background: #f1f5f9; }
+.result-table .result-verdict { font-weight: 700; text-align: center; }
+.result-table .result-verdict.pass { color: #059669; }
+.result-table .result-verdict.fail { color: #dc2626; }
+.result-table .result-verdict.skip { color: #9ca3af; }
+.result-table .result-file { font-family: "Consolas", monospace; font-size: 11px; color: #64748b; word-break: break-all; }
+.result-table .result-note { font-size: 12px; color: #92400e; line-height: 1.5; }
+.result-table td.mono { font-family: "Consolas", monospace; }
 
 .result-at { margin-top: 8px; }
 .at-content {
@@ -421,17 +422,6 @@ body {
 .note-item .note-item-text {
   color: #78350f;
 }
-.chip-note-inline {
-  margin-top: 4px;
-  padding: 4px 8px;
-  background: #fef3c7;
-  border-left: 3px solid #f59e0b;
-  border-radius: 4px;
-  font-size: 11px;
-  color: #92400e;
-  line-height: 1.4;
-}
-
 /* 配置管理页 - 条件描述 */
 .cond-desc {
   font-size: 11px;

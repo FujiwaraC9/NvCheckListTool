@@ -15,9 +15,8 @@
       "key": "android_version",
       "label": "安卓版本",
       "order": 2,
-      "auto_read": null,
-      "options": ["9", "10", "12"],
-      "auto_read_hint": "自动读取方法待定，暂手动选择"
+      "auto_read": { "command": "AT+QGMR" },
+      "options": ["9", "10", "12"]
     },
     {
       "key": "customer",
