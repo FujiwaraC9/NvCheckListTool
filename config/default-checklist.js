@@ -1,0 +1,200 @@
+/**
+ * 云端默认配置的本地快照（file:// 直开 + 断网时的完整兜底）。
+ * 内容须与 config/default-checklist.json 保持同步。
+ */
+window.DEFAULT_CHECKLIST = {
+  version: 3,
+  updated_at: "2026-08-26",
+  description: "NV Checklist 云端默认配置 v3 - 按 NvCheckList.md 需求文档重构",
+
+  dimensions: [
+    {
+      key: "platform",
+      label: "平台",
+      order: 1,
+      auto_read: { command: "AT+QGMR" },
+      options: ["UIS7885", "UIS7863", "UIS7861", "SL8541E", "SL8521E", "SL8581A", "SL8581E"]
+    },
+    {
+      key: "android_version",
+      label: "安卓版本",
+      order: 2,
+      auto_read: { command: "AT+QGMR" },
+      options: ["9", "10", "12"]
+    },
+    {
+      key: "customer",
+      label: "分支",
+      order: 3,
+      auto_read: null,
+      options_by: {
+        "9": ["公版"],
+        "10": ["公版", "飞天"],
+        "12": ["公版", "新大陆定制"]
+      }
+    },
+    {
+      key: "baseline",
+      label: "modem基线版本",
+      order: 4,
+      auto_read: { command: "AT+CGMR", strip_prefix: "BASE  Version:" }
+    }
+  ],
+
+  items: [
+    {
+      name: "edch_Category",
+      default: "0x7",
+      conditions: {},
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "CustNV/NV_PARAM_TYPE_EXPORT_WAS_CUSTOMER_SETTINGS.xml"
+      }
+    },
+    {
+      name: "gea_encryption_algo1",
+      default: "0x0",
+      conditions: {},
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/NV_PARAM_TYPE_PREV_UMTS_MS_NW_CAP.xml"
+      },
+      note: "需要从设备中load，客户分支未关闭，待有客户需求在导入"
+    },
+    {
+      name: "gea_algo2",
+      default: "0x0",
+      conditions: {},
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/NV_PARAM_TYPE_PREV_UMTS_MS_NW_CAP.xml"
+      },
+      note: "需要从设备中load，客户分支未关闭，待有客户需求在导入"
+    },
+    {
+      name: "sim_hot_plug_cfg",
+      default: "0x0",
+      conditions: {},
+      files: {
+        fm: "ProductionParam.nvm",
+        xml: "CustNV/SIM_HOT_PLUG_CFG.xml"
+      },
+      note: "默认关闭，有特殊需求请提前确认"
+    },
+    {
+      name: "dsp_log_set",
+      default: "0x0",
+      conditions: { platform: ["SL8541E"], android_version: ["9", "10", "12"] },
+      files: {
+        fm: "nv_type_4band.nvm",
+        xml: "RDNV/NV_REF_PARAMETER.xml"
+      },
+      note: "Check时需要关闭ylog，建议开机后直接Check，如果因为开关过ylog导致值不为0x0，可以重新全擦刷包后直接在校准模式load"
+    },
+    {
+      name: "reserved2",
+      default: "0x0",
+      conditions: { platform: ["SL8541E"], android_version: ["9"] },
+      files: {
+        fm: "nv_type_4band.nvm",
+        xml: "RDNV/NV_REF_PARAMETER.xml"
+      },
+      note: "Check时需要关闭ylog，建议开机后直接Check，如果因为开关过ylog导致值不为0x0，可以重新全擦刷包后直接在校准模式load"
+    },
+    {
+      name: "cap_log_enable",
+      default: "0x0",
+      conditions: { platform: ["SL8541E"], android_version: ["9", "10", "12"] },
+      files: {
+        fm: "nv_type_4band.nvm",
+        xml: "RDNV/NV_REF_PARAMETER.xml"
+      },
+      note: "Check时需要关闭ylog，建议开机后直接Check，如果因为开关过ylog导致值不为0x0，可以重新全擦刷包后直接在校准模式load"
+    },
+    {
+      name: "cs_eb_enable",
+      default: "0x0",
+      conditions: { platform: ["SL8541E"], android_version: ["12"] },
+      files: {
+        fm: null,
+        xml: "RDNV/NV_REF_PARAMETER.xml"
+      },
+      note: "Check时需要关闭ylog，建议开机后直接Check，如果因为开关过ylog导致值不为0x0，可以重新全擦刷包后直接在校准模式load"
+    },
+    {
+      name: "sim_cap_switch",
+      default: "0x2C",
+      conditions: { platform: ["SL8541E"], android_version: ["10", "12"], customer: ["飞天"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/NV_PARAM_TYPE_EM_CFG.xml"
+      },
+      note: "飞天项目必须检查，非飞天项目暂不关注"
+    },
+    {
+      name: "nas_ue_mode[0]",
+      default: "0x2",
+      conditions: { platform: ["SL8541E"], android_version: ["12"], customer: ["新大陆定制"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/LTE_NV_MODE_CFG.xml"
+      },
+      note: "新大陆定制检查，非新大陆定制不关注"
+    },
+    {
+      name: "nas_ue_mode[1]",
+      default: "0x2",
+      conditions: { platform: ["SL8541E"], android_version: ["12"], customer: ["新大陆定制"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/LTE_NV_MODE_CFG.xml"
+      },
+      note: "新大陆定制检查，非新大陆定制不关注"
+    },
+    {
+      name: "nas_ue_usage_setting[0]",
+      default: "0x1",
+      conditions: { platform: ["SL8541E"], android_version: ["12"], customer: ["新大陆定制"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/LTE_NV_MODE_CFG.xml"
+      },
+      note: "新大陆定制检查，非新大陆定制不关注"
+    },
+    {
+      name: "nas_ue_usage_setting[1]",
+      default: "0x1",
+      conditions: { platform: ["SL8541E"], android_version: ["12"], customer: ["新大陆定制"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "RDNV/LTE_NV_MODE_CFG.xml"
+      },
+      note: "新大陆定制检查，非新大陆定制不关注"
+    },
+    {
+      name: "nv_nas_config[10]",
+      default: "0x10",
+      conditions: { platform: ["SL8541E"], android_version: ["12"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "CustNV/NV_PARAM_TYPE_EXPORT_NAS_CUSTOMER_SETTINGS.xml"
+      }
+    },
+    {
+      name: "nv_nas_config[11]",
+      default: "0x1",
+      conditions: { platform: ["UIS7885"], baseline: ["5G_MODEM_V2_23A_IEBU_W24.31.2"] },
+      files: {
+        fm: "td_nv_type.nvm",
+        xml: "CustNV/NV_PARAM_TYPE_EXPORT_NAS_CUSTOMER_SETTINGS.xml"
+      },
+      note: "平台无卡默认驻留NR，改为0x1，无卡驻留2/3G"
+    }
+  ],
+
+  serial: {
+    baudrate: 115200,
+    at_command: "AT+QFSGVERSION?",
+    response_timeout_ms: 2000
+  }
+};
