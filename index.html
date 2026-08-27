@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
   <title>NvCheckList - 展锐 NV 检查工具</title>
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <div class="app">
@@ -33,6 +33,9 @@
         </a>
       </nav>
       <div class="sidebar-footer">
+        <button class="theme-toggle-btn" id="btn-theme-toggle" title="切换主题">
+          <span class="theme-icon" id="theme-icon">🌗</span>
+        </button>
         <div class="version-info">v3.0 Web</div>
       </div>
     </aside>
@@ -245,15 +248,15 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- 依赖脚本 -->
-  <script src="lib/exceljs.min.js?v=10"></script>
+  <script src="lib/exceljs.min.js?v=13"></script>
   <!-- 配置本地快照（file:// 直开/断网兜底，须在 config-manager 之前） -->
-  <script src="config/default-checklist.js?v=10"></script>
+  <script src="config/default-checklist.js?v=13"></script>
   <!-- 应用脚本 -->
-  <script src="lib/db.js?v=10"></script>
-  <script src="lib/serial.js?v=10"></script>
-  <script src="lib/nvm-parser.js?v=10"></script>
-  <script src="lib/config-manager.js?v=10"></script>
-  <script src="lib/excel-export.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="lib/db.js?v=13"></script>
+  <script src="lib/serial.js?v=13"></script>
+  <script src="lib/nvm-parser.js?v=13"></script>
+  <script src="lib/config-manager.js?v=13"></script>
+  <script src="lib/excel-export.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

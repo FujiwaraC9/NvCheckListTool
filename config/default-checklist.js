@@ -24,7 +24,7 @@ window.DEFAULT_CHECKLIST = {
     },
     {
       key: "customer",
-      label: "分支",
+      label: "客户版本",
       order: 3,
       auto_read: null,
       options_by: {

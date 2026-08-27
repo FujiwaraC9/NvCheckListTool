@@ -159,7 +159,7 @@ function checkBrowserSupport() {
  * 渲染维度选择区（v3）
  * - platform：下拉（自动读取 AT+QGMR，读出后自动选中；也可手动选）
  * - android_version：下拉（手动，读取方法待定）
- * - customer：下拉（选项随安卓版本联动）
+ * - customer：下拉（选项随安卓版本联动，即客户版本）
  * - baseline：文本框（自动读取 AT+CGMR，读出后自动填充；可手动修改）
  */
 function renderDimensions() {
@@ -202,7 +202,7 @@ function bindDimensionEvents() {
       const key = sel.dataset.key;
       state.selection[key] = sel.value;
       if (key === 'android_version') {
-        // 安卓版本变化 → 刷新分支选项并清空已选分支
+        // 安卓版本变化 → 刷新客户版本选项并清空已选
         state.selection.customer = '';
         refreshCustomerOptions();
       }
@@ -217,7 +217,7 @@ function bindDimensionEvents() {
   });
 }
 
-/** 安卓版本变化后刷新分支下拉选项 */
+/** 安卓版本变化后刷新客户版本下拉选项 */
 function refreshCustomerOptions() {
   const customerSel = $('.dim-select[data-key="customer"]');
   if (!customerSel) return;
@@ -352,6 +352,14 @@ async function connectPort() {
   try {
     const port = await choosePort();
     if (!port) return; // 用户取消
+    // 先尝试打开串口验证端口可用（被占用/无权限会在此抛错，不进入"已连接"状态）
+    try {
+      await Serial.open(port, { baudrate: (state.cfg && state.cfg.serial && state.cfg.serial.baudrate) || 115200 });
+    } catch (openErr) {
+      await modalAlert('串口打开失败：' + openErr.message + '\n\n可能原因：串口已被其他程序（如 Y-Link / QXDM / 超级终端）占用，请关闭占用程序后重试。', '无法打开串口', 'error');
+      logLine('串口打开失败: ' + openErr.message, 'err');
+      return;
+    }
     state.port = port;
     state.autoReading = true;
     updatePortStatus(true, '读取中...');
@@ -387,7 +395,7 @@ async function disconnectPort() {
     }
   } catch (e) { /* ignore */ }
   state.port = null;
-  // 清空自动读取的维度值（保留手选的安卓版本/分支）
+  // 清空自动读取的维度值（保留手选的安卓版本/客户版本）
   const dims = ConfigManager.getDimensions();
   for (const d of dims) {
     if (d.auto_read) state.selection[d.key] = '';
@@ -415,28 +423,30 @@ async function choosePort() {
     const items = [];
     known.forEach((p, i) => {
       const info = p.getInfo ? p.getInfo() : {};
-      const usb = info.usbVendorId != null
-        ? ('USB VID:' + info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() +
-           ' PID:' + (info.usbProductId || 0).toString(16).padStart(4, '0').toUpperCase())
-        : '串口设备';
+      // VID/PID 识别常见厂商
+      const vendorName = guessVendorName(info.usbVendorId);
+      const vid = info.usbVendorId != null
+        ? info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() : '????';
+      const pid = info.usbProductId != null
+        ? (info.usbProductId || 0).toString(16).padStart(4, '0').toUpperCase() : '????';
       const isLast = lastPortInfo && info.usbVendorId === lastPortInfo.vid && info.usbProductId === lastPortInfo.pid;
+      const title = vendorName + (isLast ? '（上次使用）' : '');
       items.push(
         '<li class="modal-list-item' + (isLast ? ' selected' : '') + '" data-port-idx="' + i + '">' +
         '<span class="list-icon">🔌</span>' +
-        '<span class="list-main"><span class="list-title">串口 ' + (i + 1) + (isLast ? '（上次使用）' : '') + '</span>' +
-        '<span class="list-sub">' + escapeHtml(usb) + '</span></span></li>');
+        '<span class="list-main"><span class="list-title">' + escapeHtml(title) + '</span>' +
+        '<span class="list-sub">USB VID:' + vid + ' PID:' + pid + '</span></span></li>');
     });
     items.push(
       '<li class="modal-list-item" data-port-idx="new">' +
       '<span class="list-icon">＋</span>' +
-      '<span class="list-main"><span class="list-title">授权其他串口…</span>' +
-      '<span class="list-sub">需要通过浏览器授权弹窗选择新设备</span></span></li>');
+      '<span class="list-main"><span class="list-title">授权新串口…</span>' +
+      '<span class="list-sub">通过浏览器弹窗选择新设备（可看到串口号）</span></span></li>');
 
     const result = await showModal({
       title: '选择 AT 串口',
       icon: 'info',
-      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:var(--text-secondary)">请选择展锐 AT 串口（通常是 Unisoc Phone 设备名）：</p>' +
-        '<ul class="modal-list">' + items.join('') + '</ul>',
+      bodyHtml: '<ul class="modal-list">' + items.join('') + '</ul>',
       buttons: [{ text: '取消', class: '', value: null }],
       onMount: (overlay, close) => {
         overlay.querySelectorAll('[data-port-idx]').forEach(li => {
@@ -449,14 +459,43 @@ async function choosePort() {
     });
 
     if (result === 'new') {
-      // 用户选择"授权其他串口"→ 先弹引导说明，再调用浏览器弹窗
-      return await requestPortWithGuide();
+      // 用户选择"授权新串口"→ 直接调浏览器授权弹窗（不再弹冗余引导）
+      try {
+        return await Serial.requestPort();
+      } catch (e) {
+        return null;
+      }
     }
     return result || null;
   }
 
-  // 无已授权端口（首次使用）→ 弹自定义引导说明
-  return await requestPortWithGuide();
+  // 无已授权端口（首次使用）→ 直接走浏览器授权弹窗
+  try {
+    return await Serial.requestPort();
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 根据 USB VID 猜一下厂商名，方便用户识别 */
+function guessVendorName(vid) {
+  if (vid == null) return '串口设备';
+  const v = Number(vid).toString(16).padStart(4, '0').toLowerCase();
+  const map = {
+    '1782': '展锐设备 (Unisoc)',
+    '18d1': 'Google 设备',
+    '2c7c': 'Quectel 模组',
+    '2ecc': 'Samsung 设备',
+    '04e8': 'Samsung 设备',
+    '19d2': 'ZTE 设备',
+    '12d1': 'Huawei 设备',
+    '10c4': 'Silicon Labs CP210x',
+    '1a86': 'QinHeng CH340',
+    '067b': 'Prolific PL2303',
+    '0403': 'FTDI 设备',
+    '8086': 'Intel 设备',
+  };
+  return map[v] || ('USB 串口设备 (VID:' + v.toUpperCase() + ')');
 }
 
 /**
@@ -866,7 +905,7 @@ function renderHistoryTable() {
   } else {
     pageData.forEach(rec => {
       const tr = document.createElement('tr');
-      // 展示选择信息（平台/安卓/分支/基线）
+      // 展示选择信息（平台/安卓/客户版本/基线）
       const selText = rec.selection ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，') : '';
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
@@ -1219,9 +1258,80 @@ async function showRecordDetail(rec) {
   });
 }
 
+// ===== 主题切换 =====
+const THEME_OPTIONS = [
+  { key: 'system', label: '跟随系统', icon: '🌓' },
+  { key: 'light', label: '浅色模式', icon: '☀️' },
+  { key: 'dark', label: '深色模式', icon: '🌙' },
+];
+
+async function initTheme() {
+  // 读取保存的主题；IndexedDB 在某些受限环境可能挂起，给个超时避免阻塞启动
+  let saved = 'system';
+  try {
+    saved = await Promise.race([
+      DB.getPref('theme'),
+      new Promise(resolve => setTimeout(() => resolve('system'), 800)),
+    ]) || 'system';
+  } catch (e) { /* ignore */ }
+  applyTheme(saved);
+
+  const btn = $('#btn-theme-toggle');
+  if (btn) {
+    btn.addEventListener('click', onThemeToggleClick);
+  }
+  // 跟随系统时监听系统切换
+  if (window.matchMedia) {
+    try {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        const cur = document.documentElement.getAttribute('data-theme') || 'system';
+        if (!cur || cur === 'system') applyTheme('system');
+      });
+    } catch (e) { /* 老浏览器可能不支持 addEventListener，忽略 */ }
+  }
+}
+
+function applyTheme(themeKey) {
+  const root = document.documentElement;
+  if (themeKey === 'system' || !themeKey) {
+    root.removeAttribute('data-theme');
+  } else {
+    root.setAttribute('data-theme', themeKey);
+  }
+  const icon = $('#theme-icon');
+  const opt = THEME_OPTIONS.find(o => o.key === (themeKey || 'system'));
+  if (icon && opt) icon.textContent = opt.icon;
+  // 持久化
+  DB.setPref('theme', themeKey || 'system').catch(() => {});
+}
+
+async function onThemeToggleClick() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'system';
+  const items = THEME_OPTIONS.map(o =>
+    '<li class="modal-list-item' + (o.key === cur ? ' selected' : '') + '" data-theme-key="' + o.key + '">' +
+    '<span class="list-icon" style="font-size:18px">' + o.icon + '</span>' +
+    '<span class="list-main"><span class="list-title">' + o.label + '</span>' +
+    '<span class="list-sub">' + (o.key === 'system' ? '自动跟随操作系统外观' : o.key === 'light' ? '始终使用浅色界面' : '始终使用深色界面') + '</span></span></li>'
+  ).join('');
+
+  const result = await showModal({
+    title: '外观主题',
+    icon: 'info',
+    bodyHtml: '<ul class="modal-list">' + items + '</ul>',
+    buttons: [{ text: '取消', class: '', value: null }],
+    onMount: (overlay, close) => {
+      overlay.querySelectorAll('[data-theme-key]').forEach(li => {
+        li.addEventListener('click', () => close(li.dataset.themeKey));
+      });
+    },
+  });
+  if (result) applyTheme(result);
+}
+
 // ===== 初始化 =====
 async function init() {
   bindEvents();
+  await initTheme();
 
   const warnings = checkBrowserSupport();
   if (warnings.length > 0) {
@@ -1264,7 +1374,7 @@ async function init() {
   } catch (e) { /* ignore */ }
 
   updateRunButton();
-  logLine('就绪。请点击"连接串口"（自动读取平台/安卓版本/基线）、选择分支、选择文件夹后点击"开始检查"。', 'info');
+  logLine('就绪。请点击"连接串口"（自动读取平台/安卓版本/基线）、选择客户版本、选择文件夹后点击"开始检查"。', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
