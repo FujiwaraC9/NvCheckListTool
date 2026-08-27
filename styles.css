@@ -380,15 +380,20 @@ body {
   font-size: 13px;
   color: #6b7280;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .dimension-item label .auto-tag {
   font-size: 11px;
   color: #3b82f6;
   background: #eff6ff;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 8px;
-  margin-left: 6px;
   font-weight: 400;
+  white-space: nowrap;
+  line-height: 1.4;
 }
 .dimension-item .select,
 .dimension-item .input { width: 100%; box-sizing: border-box; }
