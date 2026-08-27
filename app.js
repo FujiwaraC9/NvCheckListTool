@@ -412,7 +412,7 @@ async function choosePort() {
     const result = await showModal({
       title: '选择 AT 串口',
       icon: 'info',
-      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:#64748b">请选择设备名含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口：</p>' +
+      bodyHtml: '<p style="margin-bottom:10px;font-size:13px;color:#64748b">请选择展锐 AT 串口（通常是 Unisoc Phone 设备名）：</p>' +
         '<ul class="modal-list">' + items.join('') + '</ul>',
       buttons: [{ text: '取消', class: '', value: null }],
       onMount: (overlay, close) => {
@@ -448,7 +448,7 @@ async function requestPortWithGuide() {
     bodyHtml:
       '<p>即将弹出浏览器的串口授权窗口，请按以下步骤操作：</p>' +
       '<ol style="margin:8px 0 0 20px;padding:0;font-size:14px;line-height:1.8">' +
-      '<li>在弹出的列表中，选择名称包含 <b>' + escapeHtml(state.cfg.serial.port_keyword || 'SPRD LTE AT') + '</b> 的串口（通常是 Unisoc Phone）</li>' +
+      '<li>在弹出的列表中，选择展锐 AT 串口（设备名通常为 Unisoc Phone）</li>' +
       '<li>如果有多个 Unisoc Phone 端口，请逐个尝试（AT 口通常是最后一个或倒数第二个）</li>' +
       '<li>选中后点击"连接"按钮授权</li>' +
       '</ol>' +
@@ -460,7 +460,7 @@ async function requestPortWithGuide() {
   });
   if (!confirmed) return null;
   try {
-    const port = await Serial.requestPort(state.cfg.serial.port_keyword);
+    const port = await Serial.requestPort();
     // 记住端口信息
     if (port) {
       const info = port.getInfo ? port.getInfo() : {};
@@ -930,7 +930,6 @@ function refreshConfigPage() {
     label.className = 'config-status cloud';
   }
 
-  $('#cfg-port-keyword').value = cfg.serial.port_keyword;
   $('#cfg-baudrate').value = cfg.serial.baudrate;
   $('#cfg-at-command').value = cfg.serial.at_command;
   $('#cfg-timeout').value = cfg.serial.response_timeout_ms;
@@ -993,7 +992,6 @@ function collectConfigFromForm() {
   });
   cfg.items = newItems;
   cfg.serial = {
-    port_keyword: $('#cfg-port-keyword').value.trim() || 'SPRD LTE AT(WIQ)',
     baudrate: parseInt($('#cfg-baudrate').value) || 115200,
     at_command: $('#cfg-at-command').value.trim() || 'AT+QFSGVERSION?',
     response_timeout_ms: parseInt($('#cfg-timeout').value) || 2000,
