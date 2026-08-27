@@ -8,6 +8,7 @@ const state = {
   dirName: '',
   cfg: null,
   selection: {},          // 当前项目选择 { dimKey: value }
+  autoReading: false,     // 正在自动读取平台/安卓版本/基线（此时开始检查按钮禁用）
   // 历史记录页面分页
   historyPage: 1,
   pageSize: 20,
@@ -299,7 +300,9 @@ function updatePortStatus(connected, name) {
   const val = $('#status-port .status-value');
   val.className = 'status-value ' + (connected ? 'connected' : 'disconnected');
   val.innerHTML = '<span class="dot"></span>' + (connected ? (name || '已连接') : '未连接');
-  $('#btn-connect-port').textContent = connected ? '断开连接' : '连接串口';
+  const btn = $('#btn-connect-port');
+  btn.textContent = connected ? '断开连接' : '连接串口';
+  btn.className = 'btn ' + (connected ? 'btn-disconnect' : 'btn-connect');
   updateRunButton();
 }
 
@@ -307,18 +310,29 @@ function updateFolderStatus(connected, name) {
   const val = $('#status-folder .status-value');
   val.className = 'status-value ' + (connected ? 'connected' : 'disconnected');
   val.innerHTML = '<span class="dot"></span>' + (connected ? name : '未选择');
-  $('#btn-select-folder').textContent = connected ? '重新选择' : '选择文件夹';
+  const btn = $('#btn-select-folder');
+  btn.textContent = connected ? '重新选择' : '选择文件夹';
+  btn.className = 'btn ' + (connected ? 'btn-folder-reselect' : 'btn-folder');
   updateRunButton();
 }
 
 function updateRunButton() {
+  const btn = $('#btn-run-check');
+  if (state.autoReading) {
+    btn.disabled = true;
+    btn.textContent = '正在读取设备信息...';
+    return;
+  }
+  // 必选维度：有 options/options_by 的维度（下拉型）必须已选择
+  const dims = ConfigManager.getDimensions();
+  const missingDims = dims.filter(d => (d.options || d.options_by) && !state.selection[d.key]);
   const activeItems = ConfigManager.getActiveItems(state.selection);
-  const ok = state.port && state.dirHandle && activeItems.length > 0;
-  $('#btn-run-check').disabled = !ok;
-  if (state.port && state.dirHandle && activeItems.length === 0) {
-    $('#btn-run-check').textContent = '无匹配检查项';
+  const ready = state.port && state.dirHandle && missingDims.length === 0 && activeItems.length > 0;
+  btn.disabled = !ready;
+  if (state.port && state.dirHandle && missingDims.length === 0 && activeItems.length === 0) {
+    btn.textContent = '无匹配检查项';
   } else {
-    $('#btn-run-check').textContent = '开始检查';
+    btn.textContent = '开始检查';
   }
 }
 
@@ -339,9 +353,11 @@ async function connectPort() {
     const port = await choosePort();
     if (!port) return; // 用户取消
     state.port = port;
-    updatePortStatus(true, '已连接');
+    state.autoReading = true;
+    updatePortStatus(true, '读取中...');
     logLine('串口已连接，正在自动读取平台名、安卓版本和基线版本 ...', 'ok');
     toast('串口已连接', 'success');
+    updateRunButton(); // 读取中保持禁用
     // 记住端口信息用于下次标记"上次使用"
     try {
       const info = port.getInfo ? port.getInfo() : {};
@@ -349,8 +365,15 @@ async function connectPort() {
         await DB.setPref('lastPortInfo', { vid: info.usbVendorId, pid: info.usbProductId || 0 });
       }
     } catch (e) { /* ignore */ }
-    await autoReadDimensions();
+    try {
+      await autoReadDimensions();
+    } finally {
+      state.autoReading = false;
+      updatePortStatus(true, '已连接');
+      updateRunButton();
+    }
   } catch (e) {
+    state.autoReading = false;
     await modalAlert('串口连接失败: ' + e.message, '错误', 'error');
     logLine('串口连接失败: ' + e.message, 'err');
   }
@@ -528,10 +551,9 @@ async function autoReadDimensions() {
 }
 
 /**
- * 选择项目文件夹（带记忆 + 恢复）
- * - 上次选的文件夹若权限仍在（同次会话/浏览器重开），自动加载
- * - 权限需重新确认时，弹自定义弹窗询问：恢复上次 / 重新选择
- * - showDirectoryPicker 传 startIn 定位到上次目录，加快资源管理器打开速度
+ * 选择项目文件夹（用户主动点击按钮）
+ * - 永远弹出系统选择器让用户选择（startIn 定位到上次目录加快打开速度）
+ * - 自动恢复上次文件夹的逻辑仅在 init() 里执行，不在这里
  */
 async function selectFolder() {
   if (!('showDirectoryPicker' in window)) {
@@ -539,54 +561,26 @@ async function selectFolder() {
     return;
   }
   try {
-    let handle = null;
-    const last = await DB.getPref('lastDir');
-    if (last) {
-      // 尝试恢复上次文件夹
-      let perm = 'denied';
-      try { perm = await last.queryPermission({ mode: 'read' }); } catch (e) { /* handle 失效 */ }
-      if (perm === 'granted') {
-        handle = last;
-      } else if (perm === 'prompt') {
-        // 需要用户手势确认，弹自定义弹窗询问
-        const choice = await showModal({
-          title: '恢复上次的文件夹？',
-          icon: 'info',
-          bodyHtml: '上次选择的文件夹：<b>' + escapeHtml(last.name || '') + '</b><br>是否直接恢复使用？',
-          buttons: [
-            { text: '重新选择', class: '', value: 'new' },
-            { text: '恢复上次', class: 'btn-primary', value: 'recover' },
-          ],
-        });
-        if (choice === 'recover') {
-          try {
-            const p = await last.requestPermission({ mode: 'read' });
-            if (p === 'granted') handle = last;
-          } catch (e) { /* ignore */ }
-        }
-      }
+    const opts = {};
+    const last = await DB.getPref('lastDir').catch(() => null);
+    try {
+      if (last && last.name) opts.startIn = last;
+    } catch (e) { /* ignore */ }
+    const btn = $('#btn-select-folder');
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = '正在打开…';
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker(opts);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
     }
-    if (!handle) {
-      // 打开系统选择器（startIn 定位上次目录，加快弹窗速度）
-      const opts = {};
-      try {
-        if (last && last.name) opts.startIn = last;
-      } catch (e) { /* ignore */ }
-      const btn = $('#btn-select-folder');
-      btn.disabled = true;
-      const oldText = btn.textContent;
-      btn.textContent = '正在打开…';
-      try {
-        handle = await window.showDirectoryPicker(opts);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = oldText;
-      }
-      if (!handle) return;
-      try {
-        await handle.requestPermission({ mode: 'read' });
-      } catch (e) { /* ignore */ }
-    }
+    if (!handle) return;
+    try {
+      await handle.requestPermission({ mode: 'read' });
+    } catch (e) { /* ignore */ }
     state.dirHandle = handle;
     state.dirName = handle.name;
     await DB.setPref('lastDir', handle);
