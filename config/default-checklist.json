@@ -80,7 +80,7 @@
     {
       "name": "dsp_log_set",
       "default": "0x0",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["9", "10", "12"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861", "SL8541E", "SL8581A", "SL8581E"], "android_version": ["9", "10", "12"] },
       "files": {
         "fm": "nv_type_4band.nvm",
         "xml": "RDNV/NV_REF_PARAMETER.xml"
@@ -100,7 +100,7 @@
     {
       "name": "cap_log_enable",
       "default": "0x0",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["9", "10", "12"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861", "SL8541E", "SL8581A", "SL8581E"], "android_version": ["9", "10", "12"] },
       "files": {
         "fm": "nv_type_4band.nvm",
         "xml": "RDNV/NV_REF_PARAMETER.xml"
@@ -110,7 +110,7 @@
     {
       "name": "cs_eb_enable",
       "default": "0x0",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["12"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861","SL8541E"], "android_version": ["12"] },
       "files": {
         "fm": null,
         "xml": "RDNV/NV_REF_PARAMETER.xml"
@@ -130,7 +130,7 @@
     {
       "name": "nas_ue_mode[0]",
       "default": "0x2",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861","SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
       "files": {
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/LTE_NV_MODE_CFG.xml"
@@ -140,7 +140,7 @@
     {
       "name": "nas_ue_mode[1]",
       "default": "0x2",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861","SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
       "files": {
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/LTE_NV_MODE_CFG.xml"
@@ -150,7 +150,7 @@
     {
       "name": "nas_ue_usage_setting[0]",
       "default": "0x1",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861","SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
       "files": {
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/LTE_NV_MODE_CFG.xml"
@@ -160,7 +160,7 @@
     {
       "name": "nas_ue_usage_setting[1]",
       "default": "0x1",
-      "conditions": { "platform": ["SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
+      "conditions": { "platform": ["UIS7863", "UIS7861","SL8541E"], "android_version": ["12"], "customer": ["新大陆定制"] },
       "files": {
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/LTE_NV_MODE_CFG.xml"
