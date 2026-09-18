@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
   <title>NvCheckList - 展锐 NV 检查工具</title>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=28">
 </head>
 <body>
   <div class="app">
@@ -25,18 +25,21 @@
         <a class="nav-item" data-page="history">
           <span class="nav-icon">≡</span> 历史记录
         </a>
+        <a class="nav-item" data-page="svn">
+          <span class="nav-icon">S</span> SVN版本验证
+        </a>
         <a class="nav-item" data-page="config">
           <span class="nav-icon">⚙</span> 配置管理
-        </a>
-        <a class="nav-item" data-page="export">
-          <span class="nav-icon">↓</span> 批量导出
         </a>
       </nav>
       <div class="sidebar-footer">
         <button class="theme-toggle-btn" id="btn-theme-toggle" title="切换主题">
           <span class="theme-icon" id="theme-icon">🌗</span>
         </button>
-        <div class="version-info">v3.0 Web</div>
+        <button class="theme-toggle-btn" id="btn-check-update" title="检查更新">
+          <span>↻</span>
+        </button>
+        <div class="version-info" id="version-info">v3.0 Web</div>
       </div>
     </aside>
 
@@ -71,6 +74,7 @@
             </div>
           </div>
           <button class="btn btn-primary btn-lg" id="btn-run-check" disabled>开始检查</button>
+          <div class="run-tip" id="run-btn-tip" hidden></div>
         </div>
 
         <div class="card">
@@ -112,6 +116,11 @@
       <section class="page" id="page-history">
         <h1 class="page-title">历史记录</h1>
 
+        <div class="record-tabs">
+          <button class="record-tab active" data-kind="nv">NV 检查记录</button>
+          <button class="record-tab" data-kind="svn">SVN 检查记录</button>
+        </div>
+
         <div class="card">
           <div class="filter-bar">
             <input type="text" class="input" id="filter-module" placeholder="按模块型号搜索...">
@@ -134,9 +143,9 @@
               <thead>
                 <tr>
                   <th style="width:40px"><input type="checkbox" id="chk-select-all"></th>
-                  <th>模块型号</th>
+                  <th id="hist-th-module">模块型号</th>
                   <th>结果</th>
-                  <th>fail信息</th>
+                  <th id="hist-th-fail">fail信息</th>
                   <th>检查时间</th>
                   <th style="width:80px">操作</th>
                 </tr>
@@ -145,6 +154,94 @@
             </table>
           </div>
           <div class="pagination" id="history-pagination"></div>
+        </div>
+      </section>
+
+      <!-- SVN 版本验证页面 -->
+      <section class="page" id="page-svn">
+        <h1 class="page-title">SVN 版本验证</h1>
+
+        <div class="card">
+          <h2 class="card-title">设备信息 <span class="hint-text" id="svn-port-hint">读取设备后在此核对</span></h2>
+          <div class="svn-device-grid">
+            <div class="svn-field">
+              <label>FSG TAG</label>
+              <div class="svn-field-val" id="svn-tag">--</div>
+            </div>
+            <div class="svn-field">
+              <label>软件版本 SW</label>
+              <div class="svn-field-val" id="svn-sw">--</div>
+            </div>
+            <div class="svn-field">
+              <label>射频版本 RF</label>
+              <div class="svn-field-val" id="svn-rf">--</div>
+            </div>
+            <div class="svn-field">
+              <label>日期 Date</label>
+              <div class="svn-field-val" id="svn-date">--</div>
+            </div>
+          </div>
+          <div class="svn-actions">
+            <button class="btn" id="btn-svn-read">读取设备版本</button>
+            <button class="btn" id="btn-svn-from-history">从历史记录导入</button>
+            <select class="select" id="svn-customer" style="max-width:180px"></select>
+            <button class="btn btn-primary" id="btn-svn-check" disabled>检查 SVN 版本</button>
+            <button class="btn" id="btn-svn-login">登录 SVN 账号</button>
+          </div>
+          <p class="config-hint" id="svn-auth-hint">首次使用请点击「登录 SVN 账号」按钮登录，账号保存在本机浏览器。</p>
+        </div>
+
+        <div class="card" id="svn-meta-card">
+          <h2 class="card-title">FSG 表格信息（SVN）
+            <span class="svn-readonly-tag" title="工具仅以只读方式访问 SVN，不会写入、提交或反传任何内容">只读</span>
+          </h2>
+          <div class="svn-meta-grid" id="svn-meta-grid">
+            <div class="svn-meta-item">
+              <span class="svn-meta-label">版本号 Revision</span>
+              <span class="svn-meta-value mono" id="svn-meta-rev">--</span>
+            </div>
+            <div class="svn-meta-item">
+              <span class="svn-meta-label">最后修改者 Author</span>
+              <span class="svn-meta-value mono" id="svn-meta-author">--</span>
+            </div>
+            <div class="svn-meta-item">
+              <span class="svn-meta-label">最后修改日期 Date</span>
+              <span class="svn-meta-value mono" id="svn-meta-date">--</span>
+            </div>
+            <div class="svn-meta-item">
+              <span class="svn-meta-label">文件大小 Size</span>
+              <span class="svn-meta-value mono" id="svn-meta-size">--</span>
+            </div>
+          </div>
+          <p class="config-hint" id="svn-meta-hint">登录并读取表格后显示 SVN 最新版本信息。工具对 FSG 表格仅只读访问，不会做任何写入或提交。</p>
+        </div>
+
+        <div class="card" id="svn-result-card" style="display:none">
+          <h2 class="card-title">验证结果 <span class="badge" id="svn-result-badge">--</span></h2>
+          <div class="result-meta">
+            <div class="meta-item"><span class="meta-label">匹配 Sheet</span><span id="svn-result-sheet" class="meta-value">--</span></div>
+            <div class="meta-item"><span class="meta-label">表格行</span><span id="svn-result-row" class="meta-value">--</span></div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table result-table">
+              <thead>
+                <tr>
+                  <th style="width:110px">检查项</th>
+                  <th>设备读取值</th>
+                  <th>SVN 表格值</th>
+                  <th style="width:80px">结果</th>
+                </tr>
+              </thead>
+              <tbody id="svn-result-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">检查日志</h2>
+          <div class="log-panel" id="svn-log-panel">
+            <div class="log-line log-info">连接串口后点击「读取设备版本」，再选择对应定制版 sheet 并检查。</div>
+          </div>
         </div>
       </section>
 
@@ -158,7 +255,6 @@
               <span class="config-status" id="config-source-label">加载中...</span>
             </div>
             <div>
-              <button class="btn" id="btn-refresh-default">拉取云端默认</button>
               <button class="btn btn-danger" id="btn-reset-default">恢复云端默认</button>
             </div>
           </div>
@@ -174,7 +270,7 @@
               <label>波特率</label>
               <input type="number" class="input" id="cfg-baudrate">
             </div>
-            <div class="form-item">
+            <div class="form-item" hidden>
               <label>AT 命令</label>
               <input type="text" class="input" id="cfg-at-command">
             </div>
@@ -209,38 +305,6 @@
           <button class="btn btn-primary btn-lg" id="btn-save-config">保存本地配置</button>
         </div>
       </section>
-
-      <!-- 批量导出页面 -->
-      <section class="page" id="page-export">
-        <h1 class="page-title">批量导出</h1>
-        <div class="card">
-          <p class="config-hint">选择历史记录进行批量导出。导出文件为 .xlsx 格式，包含 pass/fail 颜色标注。</p>
-          <div class="filter-bar">
-            <input type="text" class="input" id="exp-filter-module" placeholder="按模块型号搜索...">
-            <input type="date" class="input" id="exp-date-from">
-            <span style="color:var(--text-muted)">~</span>
-            <input type="date" class="input" id="exp-date-to">
-            <button class="btn" id="btn-exp-search">搜索</button>
-            <div style="flex:1"></div>
-            <span class="hint-text" id="exp-count">共 0 条</span>
-            <button class="btn btn-primary" id="btn-export-all" disabled>导出全部</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table" id="export-table">
-              <thead>
-                <tr>
-                  <th style="width:40px"><input type="checkbox" id="exp-chk-all"></th>
-                  <th>模块型号</th>
-                  <th>结果</th>
-                  <th>fail信息</th>
-                  <th>检查时间</th>
-                </tr>
-              </thead>
-              <tbody id="export-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
@@ -248,15 +312,16 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- 依赖脚本 -->
-  <script src="lib/exceljs.min.js?v=13"></script>
+  <script src="lib/exceljs.min.js?v=21"></script>
   <!-- 配置本地快照（file:// 直开/断网兜底，须在 config-manager 之前） -->
-  <script src="config/default-checklist.js?v=13"></script>
+  <script src="config/default-checklist.js?v=20"></script>
   <!-- 应用脚本 -->
-  <script src="lib/db.js?v=13"></script>
-  <script src="lib/serial.js?v=13"></script>
-  <script src="lib/nvm-parser.js?v=13"></script>
-  <script src="lib/config-manager.js?v=13"></script>
-  <script src="lib/excel-export.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="lib/db.js?v=29"></script>
+  <script src="lib/serial.js?v=20"></script>
+  <script src="lib/nvm-parser.js?v=20"></script>
+  <script src="lib/config-manager.js?v=20"></script>
+  <script src="lib/excel-export.js?v=29"></script>
+  <script src="lib/svn-check.js?v=29"></script>
+  <script src="app.js?v=29"></script>
 </body>
 </html>

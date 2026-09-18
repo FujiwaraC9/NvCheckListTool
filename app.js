@@ -13,8 +13,7 @@ const state = {
   historyPage: 1,
   pageSize: 20,
   historyFiltered: [],
-  // 导出页面缓存
-  expFiltered: [],
+  historyKind: 'nv',       // 当前历史标签：'nv'（NV检查记录）| 'svn'（SVN检查记录）
 };
 
 // ===== 工具函数 =====
@@ -136,7 +135,7 @@ function switchPage(pageName) {
   if (nav) nav.classList.add('active');
   if (pageName === 'history') refreshHistoryPage();
   if (pageName === 'config') refreshConfigPage();
-  if (pageName === 'export') refreshExportPage();
+  if (pageName === 'svn') refreshSvnPage();
 }
 
 function checkBrowserSupport() {
@@ -334,6 +333,74 @@ function updateRunButton() {
   } else {
     btn.textContent = '开始检查';
   }
+  // 按钮变为可用时，立即隐藏悬停提示（避免鼠标静止不动时残留过期文案）
+  if (ready) {
+    const tip = $('#run-btn-tip');
+    if (tip && !tip.hidden) {
+      tip.classList.remove('show');
+      tip.hidden = true;
+    }
+  }
+}
+
+/**
+ * "开始检查"按钮被禁用时，返回原因提示文案（用于鼠标悬停浮动提示）。
+ * 按操作流程顺序给出第一个未满足的条件：
+ * 串口 → 必选维度（平台/安卓版本/客户版本等） → 项目文件夹 → 匹配检查项。
+ * @returns {string} 提示文案，为空表示无需提示（按钮可用或正在读取）
+ */
+function getRunTipMessage() {
+  if (state.autoReading) return '';
+  if (!state.port) return '请连接串口';
+  const dims = ConfigManager.getDimensions();
+  const missing = dims.filter(d => (d.options || d.options_by) && !state.selection[d.key]);
+  if (missing.length > 0) return '请选择' + missing[0].label;
+  if (!state.dirHandle) return '请选择项目文件夹';
+  const activeItems = ConfigManager.getActiveItems(state.selection);
+  if (activeItems.length === 0) return '当前条件下无匹配的检查项';
+  return '';
+}
+
+/** "开始检查"按钮禁用原因的浮动提示：跟随鼠标移动，实时刷新文案 */
+function setupRunBtnTip() {
+  const btn = $('#btn-run-check');
+  const tip = $('#run-btn-tip');
+  if (!btn || !tip) return;
+
+  function position(e) {
+    const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    const y = Math.min(e.clientY + 16, window.innerHeight - tip.offsetHeight - 8);
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+
+  btn.addEventListener('mouseenter', (e) => {
+    const msg = btn.disabled ? getRunTipMessage() : '';
+    if (!msg) return;
+    tip.textContent = msg;
+    tip.hidden = false;
+    position(e);
+    requestAnimationFrame(() => tip.classList.add('show'));
+  });
+  // 鼠标在按钮上移动时实时跟随，并同步最新状态（如刚连上串口/选了客户版本）
+  btn.addEventListener('mousemove', (e) => {
+    const msg = btn.disabled ? getRunTipMessage() : '';
+    if (!msg) {
+      tip.classList.remove('show');
+      tip.hidden = true;
+      return;
+    }
+    if (tip.textContent !== msg) tip.textContent = msg;
+    if (tip.hidden) {
+      tip.hidden = false;
+      requestAnimationFrame(() => tip.classList.add('show'));
+    }
+    position(e);
+  });
+  btn.addEventListener('mouseleave', () => {
+    tip.classList.remove('show');
+    tip.hidden = true;
+  });
 }
 
 /**
@@ -410,7 +477,7 @@ async function disconnectPort() {
 /**
  * 自定义串口选择弹窗。
  * - 有已授权串口：弹自定义列表供选择（不触发浏览器弹窗）
- * - 无已授权串口（首次）：先弹自定义引导说明，用户确认后才调用浏览器 requestPort（浏览器安全限制，无法绕过）
+ * - 无已授权串口（首次）：直接调用浏览器 requestPort（浏览器安全限制，无法绕过）
  * 连接成功后记住端口 VID/PID，下次在列表中标记"上次使用"。
  * @returns {SerialPort|null}
  */
@@ -459,7 +526,7 @@ async function choosePort() {
     });
 
     if (result === 'new') {
-      // 用户选择"授权新串口"→ 直接调浏览器授权弹窗（不再弹冗余引导）
+      // 用户选择"授权新串口"→ 直接调浏览器授权弹窗
       try {
         return await Serial.requestPort();
       } catch (e) {
@@ -496,45 +563,6 @@ function guessVendorName(vid) {
     '8086': 'Intel 设备',
   };
   return map[v] || ('USB 串口设备 (VID:' + v.toUpperCase() + ')');
-}
-
-/**
- * 弹出自定义引导说明，用户确认后才触发浏览器原生串口授权弹窗。
- * 这是 Web Serial API 的安全限制：首次授权必须由用户手势触发且浏览器弹出选择框，网页无法绕过。
- * @returns {SerialPort|null}
- */
-async function requestPortWithGuide() {
-  const confirmed = await showModal({
-    title: '授权串口',
-    icon: 'info',
-    bodyHtml:
-      '<p>即将弹出浏览器的串口授权窗口，请按以下步骤操作：</p>' +
-      '<ol style="margin:8px 0 0 20px;padding:0;font-size:14px;line-height:1.8">' +
-      '<li>在弹出的列表中，选择展锐 AT 串口（设备名通常为 Unisoc Phone）</li>' +
-      '<li>如果有多个 Unisoc Phone 端口，请逐个尝试（AT 口通常是最后一个或倒数第二个）</li>' +
-      '<li>选中后点击"连接"按钮授权</li>' +
-      '</ol>' +
-      '<p style="margin-top:10px;font-size:13px;color:var(--warn-title)">⚠ 授权后下次使用无需再弹此窗口，直接在列表中选择即可。</p>',
-    buttons: [
-      { text: '取消', class: '', value: false },
-      { text: '去选择', class: 'btn-primary', value: true },
-    ],
-  });
-  if (!confirmed) return null;
-  try {
-    const port = await Serial.requestPort();
-    // 记住端口信息
-    if (port) {
-      const info = port.getInfo ? port.getInfo() : {};
-      if (info.usbVendorId != null) {
-        await DB.setPref('lastPortInfo', { vid: info.usbVendorId, pid: info.usbProductId || 0 }).catch(() => {});
-      }
-    }
-    return port;
-  } catch (e) {
-    if (e.name === 'NotFoundError') return null;
-    throw e;
-  }
 }
 
 /**
@@ -721,8 +749,11 @@ async function runCheck() {
       const parsed = Serial.parseQfsgversion(resp);
       atFullText = parsed.atFullText;
       module = parsed.module;
+      // 同步设备版本信息到「SVN版本验证」页，免去在那里重复读取
+      SvnCheck.setDeviceFromResponse(resp);
       if (module) {
         logLine('模块型号: ' + module, 'ok');
+        logLine('设备版本已同步到「SVN版本验证」页', 'info');
       } else {
         logLine('响应中未找到 Tag:', 'warn');
       }
@@ -874,7 +905,28 @@ function showResultCard(rec, activeItems) {
 
 // ===== 历史记录页面 =====
 
-async function refreshHistoryPage() {
+function refreshHistoryPage() {
+  applyHistoryFilter();
+}
+
+/** 当前历史标签对应的数据库仓库 */
+function currentHistoryStore() {
+  return state.historyKind === 'svn' ? DB.SVN_STORE : DB.STORE;
+}
+
+/** 切换 NV / SVN 历史记录标签 */
+function switchHistoryKind(kind) {
+  if (kind !== 'nv' && kind !== 'svn') return;
+  state.historyKind = kind;
+  $$('.record-tab').forEach(t => t.classList.toggle('active', t.dataset.kind === kind));
+  // 切换标签时复位筛选条件，避免上一类的关键字造成“暂无记录”的困惑
+  $('#filter-module').value = '';
+  $('#filter-result').value = '';
+  $('#filter-date-from').value = '';
+  $('#filter-date-to').value = '';
+  // 表头随类型切换
+  $('#hist-th-module').textContent = kind === 'svn' ? 'FSG TAG / 客户版本' : '模块型号';
+  $('#hist-th-fail').textContent = kind === 'svn' ? '不匹配 / 异常信息' : 'fail信息';
   applyHistoryFilter();
 }
 
@@ -883,14 +935,16 @@ async function applyHistoryFilter() {
   const result = $('#filter-result').value;
   const from = $('#filter-date-from').value;
   const to = $('#filter-date-to').value;
+  const store = state.historyKind === 'svn' ? DB.SVN_STORE : DB.STORE;
   state.historyFiltered = await DB.queryRecords({
     moduleKeyword: kw, result, dateFrom: from, dateTo: to,
-  });
+  }, store);
   state.historyPage = 1;
   renderHistoryTable();
 }
 
 function renderHistoryTable() {
+  const kind = state.historyKind;
   const tbody = $('#history-tbody');
   tbody.innerHTML = '';
   const total = state.historyFiltered.length;
@@ -905,11 +959,23 @@ function renderHistoryTable() {
   } else {
     pageData.forEach(rec => {
       const tr = document.createElement('tr');
-      // 展示选择信息（平台/安卓/客户版本/基线）
-      const selText = rec.selection ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，') : '';
+      let mainCell = '';
+      if (kind === 'svn') {
+        mainCell = escapeHtml(rec.tag || rec.module || '-') +
+          '<br><span style="font-size:12px;color:var(--text-muted)">' +
+          escapeHtml([rec.customer, rec.sheet].filter(Boolean).join(' / ') || '未选客户版本') +
+          '</span>';
+      } else {
+        // 展示选择信息（平台/安卓/客户版本/基线）
+        const selText = rec.selection
+          ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，')
+          : '';
+        mainCell = escapeHtml(rec.module || '-') +
+          (selText ? '<br><span style="font-size:12px;color:var(--text-muted)">' + escapeHtml(selText) + '</span>' : '');
+      }
       tr.innerHTML =
         '<td><input type="checkbox" class="chk-hist" data-id="' + rec.id + '"></td>' +
-        '<td>' + escapeHtml(rec.module || '-') + (selText ? '<br><span style="font-size:12px;color:var(--text-muted)">' + escapeHtml(selText) + '</span>' : '') + '</td>' +
+        '<td>' + mainCell + '</td>' +
         '<td><span class="cell-' + rec.overall + '">' + rec.overall.toUpperCase() + '</span></td>' +
         '<td class="cell-fail-text">' + escapeHtml(rec.fail_text || '-') + '</td>' +
         '<td>' + formatDateTime(rec.timestamp) + '</td>' +
@@ -1033,46 +1099,458 @@ function collectConfigFromForm() {
   return cfg;
 }
 
-// ===== 批量导出页面 =====
-
-async function refreshExportPage() {
-  state.expFiltered = await DB.queryRecords({});
-  renderExportTable();
+function getCheckedIds(cls) {
+  return $$('.' + cls + ':checked').map(c => parseInt(c.dataset.id));
 }
 
-async function applyExportFilter() {
-  const kw = $('#exp-filter-module').value.trim();
-  const from = $('#exp-date-from').value;
-  const to = $('#exp-date-to').value;
-  state.expFiltered = await DB.queryRecords({ moduleKeyword: kw, dateFrom: from, dateTo: to });
-  renderExportTable();
+// ===== SVN 版本验证页面（手动功能，独立于一键检查流程）=====
+
+function svnLog(msg, type = 'info') {
+  const panel = $('#svn-log-panel');
+  if (!panel) return;
+  const line = document.createElement('div');
+  line.className = 'log-line log-' + type;
+  const ts = new Date();
+  const hh = String(ts.getHours()).padStart(2, '0');
+  const mm = String(ts.getMinutes()).padStart(2, '0');
+  const ss = String(ts.getSeconds()).padStart(2, '0');
+  line.innerHTML = '<span class="log-ts">[' + hh + ':' + mm + ':' + ss + ']</span>' + escapeHtml(msg);
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
 }
 
-function renderExportTable() {
-  const tbody = $('#export-tbody');
-  tbody.innerHTML = '';
-  const list = state.expFiltered;
-  $('#exp-count').textContent = '共 ' + list.length + ' 条';
-  $('#btn-export-all').disabled = list.length === 0;
-  $('#exp-chk-all').checked = false;
-  if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:30px">暂无记录</td></tr>';
+/** 进入 SVN 页时刷新：设备信息（含一键检查同步）、串口状态、客户版本下拉、登录按钮、后台缓存表格 */
+function refreshSvnPage() {
+  const portConnected = !!state.port;
+  const hint = $('#svn-port-hint');
+  const d = SvnCheck.getDevice();
+  if (hint) {
+    if (d && d.tag) hint.textContent = '已带出设备版本（一键检查/历史导入），可无需再读取';
+    else if (portConnected) hint.textContent = '串口已连接，可读取设备版本';
+    else hint.textContent = '请先在「一键检查」页连接串口，或从历史记录导入';
+  }
+  // 同步按钮
+  $('#btn-svn-read').disabled = !portConnected;
+  renderSvnDevice();
+  renderSvnMeta();   // 已缓存的表格版本信息（若有）
+  // 客户版本下拉：本地配置选项，一键检查选过则预选
+  fillSvnCustomerSelect();
+  // 登录按钮状态
+  const loginBtn = $('#btn-svn-login');
+  if (loginBtn) loginBtn.textContent = SvnCheck.hasAuth() ? ('SVN账号：' + SvnCheck.getUser()) : '登录 SVN 账号';
+  const authHint = $('#svn-auth-hint');
+  if (authHint) {
+    authHint.textContent = SvnCheck.hasAuth()
+      ? ('已登录：' + SvnCheck.getUser() + '（保存于本机，点「检查 SVN 版本」时联网读取最新表格）')
+      : '首次使用请点击「登录 SVN 账号」按钮登录，账号保存在本机浏览器。';
+  }
+  // 已登录则后台静默缓存表格（供检查时按客户版本匹配 sheet），完成后刷新版本信息
+  if (SvnCheck.hasAuth() && SvnCheck.getSheetNames().length === 0) {
+    ensureSvnWorkbook({ autoLogin: false }).then(() => { updateSvnCheckBtn(); renderSvnMeta(); });
+  }
+}
+
+function renderSvnDevice() {
+  const d = SvnCheck.getDevice();
+  $('#svn-tag').textContent = d && d.tag ? d.tag : '--';
+  $('#svn-sw').textContent = d && d.sw ? d.sw : '--';
+  $('#svn-rf').textContent = d && d.rf ? d.rf : '--';
+  $('#svn-date').textContent = d && d.date ? d.date : '--';
+  updateSvnCheckBtn();
+}
+
+function updateSvnCheckBtn() {
+  const d = SvnCheck.getDevice();
+  const cust = $('#svn-customer') ? $('#svn-customer').value : '';
+  $('#btn-svn-check').disabled = !(d && d.tag && cust);
+}
+
+/** 渲染 FSG 表格的 SVN 版本信息（Revision/Author/Date/Size） */
+function renderSvnMeta(m) {
+  const meta = m || SvnCheck.getMeta();
+  const revEl = $('#svn-meta-rev');
+  if (!revEl) return;
+  if (!meta) {
+    ['svn-meta-rev', 'svn-meta-author', 'svn-meta-date', 'svn-meta-size'].forEach(id => { $('#' + id).textContent = '--'; });
     return;
   }
-  list.forEach(rec => {
-    const tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><input type="checkbox" class="chk-exp" data-id="' + rec.id + '"></td>' +
-      '<td>' + escapeHtml(rec.module || '-') + '</td>' +
-      '<td><span class="cell-' + rec.overall + '">' + rec.overall.toUpperCase() + '</span></td>' +
-      '<td class="cell-fail-text">' + escapeHtml(rec.fail_text || '-') + '</td>' +
-      '<td>' + formatDateTime(rec.timestamp) + '</td>';
-    tbody.appendChild(tr);
+  $('#svn-meta-rev').textContent = meta.revision ? ('r' + meta.revision) : '--';
+  $('#svn-meta-author').textContent = meta.author || '--';
+  $('#svn-meta-date').textContent = meta.date || '--';
+  $('#svn-meta-size').textContent = meta.sizeText || meta.size || '--';
+}
+
+/** 登录/切换 SVN 账号 */
+async function svnLogin() {
+  if (SvnCheck.hasAuth()) {
+    const yes = await modalConfirm('当前已登录：' + SvnCheck.getUser() + '，是否切换账号？', '切换账号');
+    if (!yes) return;
+    SvnCheck.clearAuth();
+  }
+  const r = await SvnCheck.loginDialog();
+  if (!r) { svnLog('已取消 SVN 登录', 'warn'); return; }
+  svnLog('SVN 登录成功：' + r.user, 'ok');
+  // 登录验证时已拉取表格；确保缓存就绪（已缓存则不重复拉）
+  await ensureSvnWorkbook({ autoLogin: false });
+  refreshSvnPage();
+}
+
+/**
+ * 填充客户版本下拉（本地配置选项：公版/飞天/新大陆定制 等）。
+ * 一键检查选过客户版本则预选，否则默认「公版」。
+ */
+function fillSvnCustomerSelect() {
+  const sel = $('#svn-customer');
+  if (!sel) return;
+  const opts = [];
+  const custDim = ((state.cfg && state.cfg.dimensions) || []).find(dim => dim.key === 'customer');
+  if (custDim) {
+    if (Array.isArray(custDim.options)) opts.push(...custDim.options);
+    else if (custDim.options_by) Object.values(custDim.options_by).forEach(arr => opts.push(...(arr || [])));
+  }
+  if (!opts.length) opts.push('公版');  // 兜底
+  const uniq = [...new Set(opts.map(o => String(o).trim()).filter(Boolean))];
+  sel.innerHTML = '';
+  uniq.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o;
+    opt.textContent = o;
+    sel.appendChild(opt);
+  });
+  const cur = state.selection && state.selection.customer;
+  if (cur && uniq.includes(cur)) sel.value = cur;
+  else if (uniq.includes('公版')) sel.value = '公版';
+}
+
+/**
+ * 按本地选的客户版本，在表格 sheet 名中找出对应的 sheet（可能多个）。
+ * 经 CUSTOMER_TABLE 一一对应解析：新大陆定制→新大陆/NL，飞天→飞天信达/Ftsafe/RDU 等；
+ * 公版等非客户项直接用所选名匹配。多候选时优先含设备模块系列（TAG 第一段）的，仍多个弹窗选择。
+ * @returns {string[]} 匹配到的 sheet 名列表
+ */
+function findSheetsByCustomer(customer, tag) {
+  const names = SvnCheck.getSheetNames();
+  if (!names.length || !customer) return [];
+  const norm = s => String(s).replace(/\s+/g, '').toUpperCase();
+  const entry = SvnCheck.resolveCustomer(customer);
+  const aliases = entry ? [customer].concat(SvnCheck.customerSheetAliases(entry)) : [customer];
+  const aliasN = Array.from(new Set(aliases.map(norm).filter(Boolean)));
+  const hits = names.filter(n => {
+    const t = norm(n);
+    return aliasN.some(a => t === a || t.includes(a));
+  });
+  if (hits.length <= 1) return hits;
+  const series = tag ? norm(String(tag).split('-')[0]) : '';
+  if (series) {
+    const bySeries = hits.filter(n => norm(n).includes(series));
+    if (bySeries.length === 1) return bySeries;
+  }
+  return hits;
+}
+
+/** 匹配到多个 sheet 时弹窗让用户选择一次，返回所选 sheet 名或 null */
+function pickSvnSheetDialog(customer, hits) {
+  const listHtml = hits.map(n =>
+    '<div class="svn-hist-item" data-sheet="' + escapeHtml(n) + '">' +
+    '<span class="svn-hist-module mono">' + escapeHtml(n) + '</span></div>').join('');
+  return showModal({
+    title: '选择 Sheet',
+    icon: 'info',
+    bodyHtml: '<p class="config-hint" style="margin:0 0 8px">客户版本「' + escapeHtml(customer) + '」在表格中匹配到 ' + hits.length + ' 个 sheet，请选择实际对应的一个：</p>' +
+      '<div class="svn-hist-list">' + listHtml + '</div>',
+    buttons: [{ text: '取消', class: '', value: null }],
+    onMount: (overlay, close) => {
+      overlay.querySelectorAll('.svn-hist-item').forEach(el => {
+        el.addEventListener('click', () => close(el.dataset.sheet));
+      });
+    },
   });
 }
 
-function getCheckedIds(cls) {
-  return $$('.' + cls + ':checked').map(c => parseInt(c.dataset.id));
+/**
+ * 确保已登录并已缓存 Excel 表格（sheet 名列表存内存，供检查时匹配）。
+ * @param {object} [opts] { autoLogin: 未登录时是否弹登录框（默认 true），_retried: 内部防重试标记 }
+ * @returns {Promise<boolean>} true 表示就绪
+ */
+async function ensureSvnWorkbook(opts) {
+  const o = Object.assign({ autoLogin: true }, opts || {});
+  if (!SvnCheck.hasAuth()) {
+    if (!o.autoLogin) return false;   // 后台静默模式：未登录不弹窗
+    const r = await SvnCheck.loginDialog();
+    if (!r) {
+      svnLog('已取消 SVN 登录', 'warn');
+      return false;
+    }
+    svnLog('SVN 登录成功：' + r.user, 'ok');
+  }
+  // 已缓存则直接用
+  if (SvnCheck.getSheetNames().length > 0) return true;
+  svnLog('正在从 SVN 读取版本跟踪表 ...', 'info');
+  try {
+    await SvnCheck.fetchWorkbook(true);
+    const count = SvnCheck.getSheetNames().length;
+    svnLog('版本跟踪表读取成功（共 ' + count + ' 个 sheet），将按所选客户版本定位', 'ok');
+    const mt = SvnCheck.getMeta();
+    if (mt && (mt.revision || mt.author || mt.date)) {
+      svnLog('表格 SVN 版本：r' + (mt.revision || '?') + '，最后修改者：' + (mt.author || '?') +
+        '，最后修改：' + (mt.date || '?') + (mt.sizeText ? ('，大小：' + mt.sizeText) : ''), 'info');
+      renderSvnMeta(mt);
+    }
+    return true;
+  } catch (e) {
+    svnLog('SVN 表格读取失败：' + e.message, 'err');
+    // 存量 token 失效（已被 401 清除）时重新走一次登录，免去多点一次
+    if (o.autoLogin && !o._retried && !SvnCheck.hasAuth()) {
+      return ensureSvnWorkbook({ autoLogin: true, _retried: true });
+    }
+    if (o.autoLogin) toast('SVN 表格读取失败：' + e.message, 'error', 3500);
+    return false;
+  }
+}
+
+/** 从历史记录导入设备版本信息（无需连接串口） */
+async function svnImportFromHistory() {
+  let records = [];
+  try {
+    records = await DB.getAllRecords();
+    records.sort((a, b) => b.timestamp - a.timestamp);
+  } catch (e) {
+    await modalAlert('读取历史记录失败：' + e.message, '错误', 'error');
+    return;
+  }
+  if (!records.length) {
+    await modalAlert('暂无历史记录，请先在「一键检查」页完成一次检查。', '无历史记录', 'warn');
+    return;
+  }
+  const listHtml = records.slice(0, 100).map(r => {
+    const cust = (r.selection && r.selection.customer) || '';
+    const hasAt = r.at_version && /\bTag\s*[:：]/i.test(r.at_version);
+    return '<div class="svn-hist-item' + (hasAt ? '' : ' svn-hist-empty') + '" data-id="' + r.id + '">' +
+      '<span class="svn-hist-time">' + formatDateTime(r.timestamp) + '</span>' +
+      '<span class="svn-hist-module mono">' + escapeHtml(r.module || '--') + '</span>' +
+      '<span class="svn-hist-cust">' + escapeHtml(cust || '未选客户版本') + '</span>' +
+      '<span class="badge ' + (r.overall === 'pass' ? 'pass' : 'fail') + '">' + (r.overall || '').toUpperCase() + '</span>' +
+      (hasAt ? '' : '<span class="svn-hist-note">无 AT 记录</span>') +
+      '</div>';
+  }).join('');
+  showModal({
+    title: '从历史记录导入设备版本',
+    icon: 'info',
+    bodyHtml: '<p class="config-hint" style="margin:0 0 8px">选择一条历史检查记录，用其中保存的 AT+QFSGVERSION? 信息进行 SVN 版本验证（无需连接设备）：</p>' +
+      '<div class="svn-hist-list">' + listHtml + '</div>',
+    buttons: [{ text: '取消', class: '', value: false }],
+    onMount: (overlay, close) => {
+      overlay.querySelectorAll('.svn-hist-item:not(.svn-hist-empty)').forEach(el => {
+        el.addEventListener('click', () => {
+          const rec = records.find(x => String(x.id) === el.dataset.id);
+          if (rec) close(rec);
+        });
+      });
+    },
+  }).then(rec => { if (rec) applySvnHistoryRecord(rec); });
+}
+
+/** 用历史记录填充 SVN 页：设备信息 + 预选该记录的客户版本 */
+async function applySvnHistoryRecord(rec) {
+  const dev = SvnCheck.setDeviceFromResponse(rec.at_version || '');
+  if (!dev.tag) {
+    svnLog('该历史记录中未解析到 Tag，无法用于 SVN 检查', 'err');
+    await modalAlert('该历史记录中未解析到 FSG TAG（at_version 为空或格式异常）。', '导入失败', 'error');
+    return;
+  }
+  const cust = rec.selection && rec.selection.customer;
+  svnLog('已从历史记录导入（' + formatDateTime(rec.timestamp) + '，模块 ' + rec.module + '）：' +
+    'Tag=' + dev.tag + '，SW=' + (dev.sw || '无') + '，RF=' + (dev.rf || '无') + '，Date=' + (dev.date || '无'), 'ok');
+  renderSvnDevice();
+  // 预选该记录保存的客户版本
+  const sel = $('#svn-customer');
+  if (cust && sel && Array.from(sel.options).some(o => o.value === cust)) {
+    sel.value = cust;
+    svnLog('已按该记录选择客户版本：' + cust, 'info');
+  }
+  // 已登录则顺手缓存表格（未登录保持现状，点检查时再登录）
+  if (SvnCheck.hasAuth() && SvnCheck.getSheetNames().length === 0) {
+    await ensureSvnWorkbook({ autoLogin: false });
+  }
+  updateSvnCheckBtn();
+}
+
+/** 读取设备 AT+QFSGVERSION? */
+async function svnReadDevice() {
+  if (!state.port) {
+    await modalAlert('串口未连接，请先到「一键检查」页连接设备串口。', '未连接串口', 'warn');
+    return;
+  }
+  const btn = $('#btn-svn-read');
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = '读取中...';
+  try {
+    const ser = (state.cfg && state.cfg.serial) || {};
+    svnLog('发送 AT+QFSGVERSION? ...', 'info');
+    const { device, resp } = await SvnCheck.readDevice(state.port, ser);
+    if (!device.tag) {
+      svnLog('未从响应中解析到 Tag，请确认设备支持该命令。原始响应见下', 'warn');
+      svnLog(resp.replace(/\s+$/g, ''), 'info');
+    } else {
+      svnLog('读取成功：Tag=' + device.tag + '，SW=' + (device.sw || '无') + '，RF=' + (device.rf || '无') + '，Date=' + (device.date || '无'), 'ok');
+    }
+    renderSvnDevice();
+    // 已登录且表格未缓存：顺手拉取（供检查时匹配 sheet）
+    if (SvnCheck.hasAuth() && SvnCheck.getSheetNames().length === 0) {
+      await ensureSvnWorkbook({ autoLogin: false });
+    }
+  } catch (e) {
+    svnLog('读取设备版本失败：' + e.message, 'err');
+    toast('读取失败：' + e.message, 'error', 3000);
+  } finally {
+    btn.disabled = !state.port;
+    btn.textContent = oldText;
+  }
+}
+
+/** 执行 SVN 版本比对并渲染结果 */
+async function svnRunCheck() {
+  const d = SvnCheck.getDevice();
+  if (!d || !d.tag) {
+    await modalAlert('缺少设备信息：请先在一键检查页完成检查（自动带出），或点击「读取设备版本」/「从历史记录导入」。', '缺少设备信息', 'warn');
+    return;
+  }
+  const customer = $('#svn-customer').value;
+  if (!customer) { await modalAlert('请先选择客户版本（公版/飞天 等）。', '请选择客户版本', 'warn'); return; }
+
+  // 登录 + 拉取表格缓存
+  const ready = await ensureSvnWorkbook();
+  if (!ready) return;
+
+  // 本地选的客户版本 → 客户表一一对应 → 表格里找对应 sheet
+  const entry = SvnCheck.resolveCustomer(customer);
+  if (entry) {
+    svnLog('客户版本「' + customer + '」→ 客户「' + entry.name + '」（代码 ' + entry.code +
+      '，别名：' + SvnCheck.customerSheetAliases(entry).join('/') + '）', 'info');
+  } else {
+    svnLog('客户版本「' + customer + '」为非客户项，直接按名称匹配 sheet', 'info');
+  }
+  const hits = findSheetsByCustomer(customer, d.tag);
+  if (!hits.length) {
+    const tried = entry ? SvnCheck.customerSheetAliases(entry) : [customer];
+    svnLog('表格中找不到客户版本「' + customer + '」对应的 sheet（已按 ' +
+      Array.from(new Set(tried)).join(' / ') + ' 匹配）', 'err');
+    await modalAlert('未查询到信息，请检查客户版本是否正确，或FSG表格是否正确更新！', '未查询到信息', 'error');
+    return;
+  }
+  let sheet = hits[0];
+  if (hits.length === 1) {
+    svnLog('按客户版本「' + customer + '」匹配到唯一 Sheet「' + sheet + '」', 'info');
+  } else {
+    // 多候选：弹窗选一次
+    const picked = await pickSvnSheetDialog(customer, hits);
+    if (!picked) { svnLog('已取消选择 sheet', 'warn'); return; }
+    sheet = picked;
+    svnLog('客户版本「' + customer + '」匹配 ' + hits.length + ' 个 sheet，已手动选择：「' + sheet + '」', 'info');
+  }
+
+  $('#btn-svn-check').disabled = true;
+  const oldText = $('#btn-svn-check').textContent;
+  $('#btn-svn-check').textContent = '检查中...';
+  try {
+    svnLog('开始比对，Sheet=「' + sheet + '」，设备 FSG TAG=' + d.tag, 'info');
+    const r = SvnCheck.runCompare(sheet);
+    renderSvnResult(r, d.tag);
+    await saveSvnRecord({ customer, sheet, device: d, result: r });
+  } catch (e) {
+    svnLog('检查失败：' + e.message, 'err');
+    toast('检查失败：' + e.message, 'error', 3000);
+  } finally {
+    $('#btn-svn-check').disabled = false;
+    $('#btn-svn-check').textContent = oldText;
+  }
+}
+
+function renderSvnResult(r, deviceTag) {
+  const card = $('#svn-result-card');
+  card.style.display = '';
+  const badge = $('#svn-result-badge');
+  badge.textContent = r.overall === 'pass' ? 'PASS' : 'FAIL';
+  badge.className = 'badge ' + (r.overall === 'pass' ? 'pass' : 'fail');
+  $('#svn-result-sheet').textContent = r.sheet;
+
+  const tbody = $('#svn-result-tbody');
+  tbody.innerHTML = '';
+
+  if (!r.rowInfo) {
+    $('#svn-result-row').textContent = '未找到';
+    svnLog('FAIL：' + r.error, 'err');
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="4" style="text-align:center;color:var(--danger,#e5484d)">' + escapeHtml(r.error || '未查询到信息') + '</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  const matchMode = r.rowInfo.byContent
+    ? (r.rowInfo.weak ? '内容包含匹配' : (r.rowInfo.prefix ? '内容前缀匹配' : '内容精确匹配'))
+    : (r.rowInfo.prefix ? 'TAG前缀匹配' : '精确匹配');
+  $('#svn-result-row').textContent = '第 ' + r.rowInfo.row + ' 行（' + matchMode + '）';
+  svnLog('在 sheet「' + r.sheet + '」第 ' + r.rowInfo.row + ' 行找到 FSG TAG：' + r.rowInfo.tag + '（' + matchMode + '）', 'info');
+  if (r.rowInfo.project) svnLog('  项目：' + r.rowInfo.project, 'info');
+
+  r.items.forEach(it => {
+    const tr = document.createElement('tr');
+    tr.className = it.match ? 'row-pass' : 'row-fail';
+    tr.innerHTML =
+      '<td>' + escapeHtml(it.label) + '</td>' +
+      '<td class="mono">' + escapeHtml(it.device) + '</td>' +
+      '<td class="mono">' + escapeHtml(it.excel) + '</td>' +
+      '<td><span class="cell-result ' + (it.match ? 'pass' : 'fail') + '">' +
+      (it.match ? 'PASS' : 'FAIL') + '</span>' +
+      (it.note ? '<div class="cell-note">' + escapeHtml(it.note) + '</div>' : '') + '</td>';
+    tbody.appendChild(tr);
+    svnLog((it.match ? '  [PASS] ' : '  [FAIL] ') + it.label + '：设备=' + it.device +
+      '，SVN=' + it.excel + (it.match ? '' : ('，' + it.note)), it.match ? 'ok' : 'err');
+  });
+
+  if (r.overall === 'pass') {
+    svnLog('结论：SW/RF/Date 三项全部一致，SVN 表格版本为最新。', 'ok');
+  } else {
+    const failed = r.items.filter(i => !i.match).map(i => i.label).join('、');
+    svnLog('结论：' + failed + ' 不匹配，SVN 表格可能未更新。', 'err');
+  }
+}
+
+/** 把一次 SVN 版本验证结果保存到独立的 svn_records 仓库（不与 NV 记录混存） */
+async function saveSvnRecord({ customer, sheet, device, result }) {
+  try {
+    const meta = SvnCheck.getMeta() || {};
+    let failText = '';
+    if (result.rowInfo) {
+      failText = result.items.filter(i => !i.match).map(i =>
+        i.label + '：设备=' + i.device + '，SVN=' + i.excel + (i.note ? '（' + i.note + '）' : '')
+      ).join('\n');
+    } else {
+      failText = result.error || '未查询到信息，请检查客户版本是否正确，或FSG表格是否正确更新！';
+    }
+    const rec = {
+      kind: 'svn',
+      module: device.tag || '',          // 复用 module 字段，供按型号(FSG TAG)搜索
+      tag: device.tag || '',
+      sw: device.sw || '', rf: device.rf || '', date: device.date || '',
+      customer: customer || '',
+      sheet: sheet || '',
+      items: result.rowInfo ? result.items.map(i => ({
+        label: i.label, device: i.device, excel: i.excel, match: !!i.match, note: i.note || '',
+      })) : [],
+      row: result.rowInfo ? result.rowInfo.row : 0,
+      error: result.rowInfo ? '' : (result.error || ''),
+      fail_text: failText,
+      overall: result.overall,
+      svn_revision: meta.revision || '',
+      timestamp: Date.now(),
+    };
+    await DB.addRecord(rec, DB.SVN_STORE);
+    svnLog('本次 SVN 检查结果已保存到「SVN 检查记录」', 'info');
+  } catch (e) {
+    svnLog('保存 SVN 历史记录失败：' + e.message, 'warn');
+  }
 }
 
 // ===== 事件绑定 =====
@@ -1084,6 +1562,13 @@ function bindEvents() {
   $('#btn-connect-port').addEventListener('click', connectPort);
   $('#btn-select-folder').addEventListener('click', selectFolder);
   $('#btn-run-check').addEventListener('click', runCheck);
+  setupRunBtnTip();
+
+  $('#btn-svn-read').addEventListener('click', svnReadDevice);
+  $('#btn-svn-check').addEventListener('click', svnRunCheck);
+  $('#btn-svn-from-history').addEventListener('click', svnImportFromHistory);
+  $('#btn-svn-login').addEventListener('click', svnLogin);
+  $('#svn-customer').addEventListener('change', updateSvnCheckBtn);
 
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
   $('#btn-filter-reset').addEventListener('click', () => {
@@ -1092,6 +1577,10 @@ function bindEvents() {
     $('#filter-date-from').value = '';
     $('#filter-date-to').value = '';
     applyHistoryFilter();
+  });
+  // NV / SVN 历史标签切换
+  $$('.record-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchHistoryKind(tab.dataset.kind));
   });
   $('#chk-select-all').addEventListener('change', (e) => {
     $$('.chk-hist').forEach(c => c.checked = e.target.checked);
@@ -1104,14 +1593,15 @@ function bindEvents() {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     const id = parseInt(btn.dataset.id);
+    const store = currentHistoryStore();
     if (btn.dataset.action === 'delete') {
       if (await modalConfirm('确定删除这条记录吗？')) {
-        await DB.deleteRecords([id]);
+        await DB.deleteRecords([id], store);
         toast('已删除', 'success');
         applyHistoryFilter();
       }
     } else if (btn.dataset.action === 'detail') {
-      const recs = await DB.getRecordsByIds([id]);
+      const recs = await DB.getRecordsByIds([id], store);
       if (recs[0]) showRecordDetail(recs[0]);
     }
   });
@@ -1119,7 +1609,7 @@ function bindEvents() {
     const ids = getCheckedIds('chk-hist');
     if (ids.length === 0) return;
     if (await modalConfirm('确定删除选中的 ' + ids.length + ' 条记录吗？')) {
-      await DB.deleteRecords(ids);
+      await DB.deleteRecords(ids, currentHistoryStore());
       toast('已删除 ' + ids.length + ' 条', 'success');
       applyHistoryFilter();
     }
@@ -1128,23 +1618,20 @@ function bindEvents() {
     const ids = getCheckedIds('chk-hist');
     if (ids.length === 0) return;
     try {
-      const recs = await DB.getRecordsByIds(ids);
-      const fname = await ExcelExport.exportRecords(recs, state.cfg);
+      const recs = await DB.getRecordsByIds(ids, currentHistoryStore());
+      const fname = state.historyKind === 'svn'
+        ? await ExcelExport.exportSvnRecords(recs)
+        : await ExcelExport.exportRecords(recs, state.cfg);
       toast('已导出: ' + fname, 'success');
     } catch (e) {
       toast('导出失败: ' + e.message, 'error');
     }
   });
 
-  $('#btn-refresh-default').addEventListener('click', async () => {
-    await ConfigManager.refreshCloud();
-    state.cfg = ConfigManager.get();
-    refreshConfigPage();
-    renderDimensions();
-    toast('已刷新云端默认配置', 'success');
-  });
   $('#btn-reset-default').addEventListener('click', async () => {
-    if (await modalConfirm('确定恢复云端默认配置吗？本地修改将全部丢失。')) {
+    if (await modalConfirm('确定恢复云端默认配置吗？本地修改将全部丢失，将从 GitHub 拉取最新配置。')) {
+      toast('正在从 GitHub 拉取最新配置...', 'info');
+      await ConfigManager.refreshCloud();
       ConfigManager.resetToCloud();
       state.cfg = ConfigManager.get();
       refreshConfigPage();
@@ -1186,19 +1673,8 @@ function bindEvents() {
     renderDimensions();
   });
 
-  $('#btn-exp-search').addEventListener('click', applyExportFilter);
-  $('#exp-chk-all').addEventListener('change', (e) => {
-    $$('.chk-exp').forEach(c => c.checked = e.target.checked);
-  });
-  $('#btn-export-all').addEventListener('click', async () => {
-    if (state.expFiltered.length === 0) return;
-    try {
-      const fname = await ExcelExport.exportRecords(state.expFiltered, state.cfg);
-      toast('已导出 ' + state.expFiltered.length + ' 条: ' + fname, 'success');
-    } catch (e) {
-      toast('导出失败: ' + e.message, 'error');
-    }
-  });
+  // 手动检查更新
+  $('#btn-check-update').addEventListener('click', () => checkForUpdate({ silent: false }));
 }
 
 function updateHistActionButtons() {
@@ -1208,6 +1684,9 @@ function updateHistActionButtons() {
 }
 
 async function showRecordDetail(rec) {
+  // SVN 版本验证记录走专属详情
+  if (rec.kind === 'svn') return showSvnRecordDetail(rec);
+
   const lines = [];
   lines.push('模块型号: ' + rec.module);
   lines.push('检查时间: ' + formatDateTime(rec.timestamp));
@@ -1252,6 +1731,43 @@ async function showRecordDetail(rec) {
   }
   await showModal({
     title: '检查记录详情',
+    icon: rec.overall === 'pass' ? 'info' : 'error',
+    bodyHtml: '<div class="modal-pre">' + escapeHtml(lines.join('\n')) + '</div>',
+    buttons: [{ text: '关闭', class: 'btn-primary', value: true }],
+  });
+}
+
+/** SVN 版本验证记录详情 */
+async function showSvnRecordDetail(rec) {
+  const lines = [];
+  lines.push('FSG TAG: ' + (rec.tag || rec.module || '-'));
+  lines.push('软件版本 SW: ' + (rec.sw || '-'));
+  lines.push('射频版本 RF: ' + (rec.rf || '-'));
+  lines.push('日期 Date: ' + (rec.date || '-'));
+  lines.push('客户版本: ' + (rec.customer || '-'));
+  lines.push('匹配 Sheet: ' + (rec.sheet || '-'));
+  if (rec.svn_revision) lines.push('SVN 表格版本: r' + rec.svn_revision);
+  lines.push('检查时间: ' + formatDateTime(rec.timestamp));
+  lines.push('总体结果: ' + (rec.overall || '').toUpperCase());
+  if (rec.items && rec.items.length) {
+    lines.push('');
+    lines.push('逐项比对:');
+    rec.items.forEach(it => {
+      lines.push('  [' + (it.match ? 'PASS' : 'FAIL') + '] ' + it.label +
+        '：设备=' + it.device + '，SVN=' + it.excel + (it.note ? '（' + it.note + '）' : ''));
+    });
+  }
+  if (rec.error) {
+    lines.push('');
+    lines.push('异常: ' + rec.error);
+  }
+  if (rec.fail_text) {
+    lines.push('');
+    lines.push('不匹配 / 异常信息:');
+    lines.push(rec.fail_text);
+  }
+  await showModal({
+    title: 'SVN 检查记录详情',
     icon: rec.overall === 'pass' ? 'info' : 'error',
     bodyHtml: '<div class="modal-pre">' + escapeHtml(lines.join('\n')) + '</div>',
     buttons: [{ text: '关闭', class: 'btn-primary', value: true }],
@@ -1375,6 +1891,81 @@ async function init() {
 
   updateRunButton();
   logLine('就绪。请点击"连接串口"（自动读取平台/安卓版本/基线）、选择客户版本、选择文件夹后点击"开始检查"。', 'info');
+
+  // 启动后静默检查更新
+  checkForUpdate({ silent: true });
+}
+
+// ===== 更新检查 =====
+async function checkForUpdate(opts) {
+  const silent = opts && opts.silent;
+  try {
+    const resp = await fetch('/api/update/check', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.error) {
+      if (!silent) toast(data.error, 'warning', 4000);
+      return;
+    }
+    if (!data.hasUpdate) {
+      if (!silent) toast('当前已是最新版本（v' + data.localVersion + '）', 'info');
+      return;
+    }
+    // 有更新，弹窗
+    showUpdateDialog(data);
+  } catch (e) {
+    if (!silent) toast('检查更新失败：' + e.message, 'error', 4000);
+  }
+}
+
+function showUpdateDialog(data) {
+  const fileList = data.changedFiles.length
+    ? data.changedFiles.map(f => '<li>' + escapeHtml(f) + '</li>').join('')
+    : '<li>（无具体文件信息，将更新全部追踪文件）</li>';
+  const restartHint = data.needRestart
+    ? '<p class="config-hint" style="color:var(--warning,#f59e0b);margin:8px 0 0">本次更新包含 server.py / launch.bat，更新后需重启本地服务才完全生效。</p>'
+    : '';
+  showModal({
+    title: '发现新版本',
+    icon: 'info',
+    bodyHtml:
+      '<p style="margin:0 0 8px">远程版本 <b>v' + escapeHtml(data.remoteVersion) + '</b>（当前 v' + escapeHtml(data.localVersion) + '），以下文件有变更：</p>' +
+      '<ul style="margin:0 0 8px;padding-left:20px;font-size:13px;font-family:Consolas,monospace">' + fileList + '</ul>' +
+      restartHint +
+      '<p class="config-hint" style="margin:8px 0 0">点击「立即更新」将自动下载并替换上述文件。</p>',
+    buttons: [
+      { text: '稍后再说', class: '', value: false },
+      { text: '立即更新', class: 'btn-primary', value: true },
+    ],
+  }).then(confirmed => {
+    if (confirmed) return applyUpdate(data.changedFiles);
+  });
+}
+
+async function applyUpdate(files) {
+  try {
+    toast('正在下载更新...', 'info');
+    const resp = await fetch('/api/update/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+      const errs = (data.errors && data.errors.length) ? '\n' + data.errors.join('\n') : '';
+      await modalAlert('更新失败：' + (data.error || '未知错误') + errs, '更新失败', 'error');
+      return;
+    }
+    const restartHint = data.needRestart ? '\n\n本次更新包含 server.py / launch.bat，请重启本地服务（重新运行 launch.bat）后刷新页面。' : '';
+    await modalAlert(
+      '更新完成！已更新 ' + data.updated.length + ' 个文件：\n' +
+      data.updated.join(', ') + restartHint + '\n\n请刷新页面（Ctrl+F5）以加载新版本。',
+      '更新成功', 'info'
+    );
+    location.reload();
+  } catch (e) {
+    await modalAlert('更新失败：' + e.message, '更新失败', 'error');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
