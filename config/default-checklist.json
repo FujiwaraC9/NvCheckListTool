@@ -55,7 +55,7 @@
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/NV_PARAM_TYPE_PREV_UMTS_MS_NW_CAP.xml"
       },
-      "note": "需要从设备中load，客户分支未关闭，待有客户需求在导入"
+      "note": "需要从设备中load，客户分支未关闭，待有客户需求再导入"
     },
     {
       "name": "gea_algo2",
@@ -65,7 +65,7 @@
         "fm": "td_nv_type.nvm",
         "xml": "RDNV/NV_PARAM_TYPE_PREV_UMTS_MS_NW_CAP.xml"
       },
-      "note": "需要从设备中load，客户分支未关闭，待有客户需求在导入"
+      "note": "需要从设备中load，客户分支未关闭，待有客户需求再导入"
     },
     {
       "name": "sim_hot_plug_cfg",
