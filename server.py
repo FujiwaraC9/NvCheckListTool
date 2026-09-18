@@ -41,7 +41,7 @@ DEFAULT_PORT = 8765
 
 # ---- 更新机制 ----
 # GitHub 仓库地址（raw 文件直链基础）
-GITHUB_RAW = 'https://raw.githubusercontent.com/FujiwaraC9/NvCheckListTool/main/web/'
+GITHUB_RAW = 'https://raw.githubusercontent.com/FujiwaraC9/NvCheckListTool/main/'
 REMOTE_VERSION_URL = GITHUB_RAW + 'version.json'
 # 追踪的文件列表（与 generate-version.py 保持一致）
 TRACKED_FILES = [
