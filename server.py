@@ -16,6 +16,7 @@ NvCheckList 本地服务（仅依赖 Python 3 标准库）
 启动：python server.py 8765
 """
 import sys
+import time
 import os
 import ssl
 import json
@@ -45,13 +46,13 @@ GITHUB_RAW = 'https://raw.githubusercontent.com/FujiwaraC9/NvCheckListTool/main/
 REMOTE_VERSION_URL = GITHUB_RAW + 'version.json'
 # 追踪的文件列表（与 generate-version.py 保持一致）
 TRACKED_FILES = [
-    'index.html', 'app.js', 'styles.css', 'server.py', 'launch.bat',
+    'index.html', 'app.js', 'styles.css', 'server.py', '启动启动通通启动.bat',
     'lib/db.js', 'lib/serial.js', 'lib/nvm-parser.js', 'lib/config-manager.js',
     'lib/excel-export.js', 'lib/svn-check.js', 'lib/exceljs.min.js',
     'config/default-checklist.js', 'config/default-checklist.json',
 ]
 # 更新后需要重启服务才生效的文件
-RESTART_FILES = {'server.py', 'launch.bat'}
+RESTART_FILES = {'server.py', '启动启动通通启动.bat'}
 
 
 def _sha1_file(path):
@@ -264,48 +265,49 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(502, {'ok': False, 'error': '无法访问 SVN：%s' % e})
 
     # ---- 更新检查 ----
+    def _fetch_remote_manifest(self):
+        """拉取远程 version.json。追加时间戳参数绕过 CDN 缓存，始终取最新清单。"""
+        url = REMOTE_VERSION_URL + '?t=' + str(int(time.time()))
+        req = urllib.request.Request(url, headers={'User-Agent': 'NvCheckList/3.0'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+
+    def _local_hashes(self):
+        """计算本地追踪文件的 SHA1。"""
+        hashes = {}
+        for rel in TRACKED_FILES:
+            full = os.path.join(BASE_DIR, rel.replace('/', os.sep))
+            if os.path.isfile(full):
+                hashes[rel] = _sha1_file(full)
+        return hashes
+
     def handle_update_check(self):
         """对比本地文件 SHA1 与远程 version.json，返回哪些文件有变更。"""
         try:
-            # 读取本地 version.json
-            local_ver_path = os.path.join(BASE_DIR, 'version.json')
             local_version = ''
+            local_ver_path = os.path.join(BASE_DIR, 'version.json')
             if os.path.isfile(local_ver_path):
-                with open(local_ver_path, 'r', encoding='utf-8') as f:
-                    local_data = json.load(f)
-                    local_version = local_data.get('version', '')
-            # 计算本地追踪文件的 SHA1
-            local_hashes = {}
-            for rel in TRACKED_FILES:
-                full = os.path.join(BASE_DIR, rel.replace('/', os.sep))
-                if os.path.isfile(full):
-                    local_hashes[rel] = _sha1_file(full)
-
-            # 拉取远程 version.json
-            req = urllib.request.Request(REMOTE_VERSION_URL, headers={'User-Agent': 'NvCheckList/3.0'})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                remote_data = json.loads(resp.read().decode('utf-8'))
+                try:
+                    with open(local_ver_path, 'r', encoding='utf-8') as f:
+                        local_version = json.load(f).get('version', '')
+                except Exception:
+                    pass
+            remote_data = self._fetch_remote_manifest()
             remote_version = remote_data.get('version', '')
             remote_files = remote_data.get('files', {})
-
             if remote_version == local_version:
-                self.send_json(200, {'hasUpdate': False, 'localVersion': local_version, 'remoteVersion': remote_version, 'changedFiles': []})
+                self.send_json(200, {'hasUpdate': False, 'localVersion': local_version,
+                                     'remoteVersion': remote_version, 'changedFiles': []})
                 return
-
-            # 找出变更文件
-            changed = []
-            for rel in TRACKED_FILES:
-                rh = remote_files.get(rel, '')
-                lh = local_hashes.get(rel, '')
-                if rh and rh != lh:
-                    changed.append(rel)
-            need_restart = any(f in RESTART_FILES for f in changed)
+            local_hashes = self._local_hashes()
+            changed = [rel for rel in TRACKED_FILES
+                       if remote_files.get(rel) and remote_files.get(rel) != local_hashes.get(rel)]
             self.send_json(200, {
                 'hasUpdate': True,
                 'localVersion': local_version,
                 'remoteVersion': remote_version,
                 'changedFiles': changed,
-                'needRestart': need_restart,
+                'needRestart': any(f in RESTART_FILES for f in changed),
             })
         except urllib.error.URLError:
             self.send_json(200, {'hasUpdate': False, 'error': '无法连接 GitHub 检查更新（可能未联网）'})
@@ -314,48 +316,38 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ---- 执行更新 ----
     def handle_update_apply(self):
-        """下载远程变更文件并覆盖本地文件。"""
+        """下载远程变更文件并覆盖本地文件（含 SHA1 完整性校验；无文件变更时也同步版本号）。"""
         try:
-            # 读取请求体（期望 JSON: {"files": ["app.js", ...]}）
             length = int(self.headers.get('Content-Length', 0) or 0)
             body = self.rfile.read(length) if length > 0 else b'{}'
             req_data = json.loads(body.decode('utf-8')) if body else {}
-            files_to_update = req_data.get('files', [])
-
-            # 如果没指定文件，从 check 接口逻辑获取完整变更列表
+            remote_data = self._fetch_remote_manifest()
+            remote_files = remote_data.get('files', {})
+            local_hashes = self._local_hashes()
+            # 文件列表：优先用前端传来的清单，否则按哈希对比自动推导
+            files_to_update = [f for f in req_data.get('files', []) if f in TRACKED_FILES]
             if not files_to_update:
-                # 重新拉远程清单对比
-                req = urllib.request.Request(REMOTE_VERSION_URL, headers={'User-Agent': 'NvCheckList/3.0'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    remote_data = json.loads(resp.read().decode('utf-8'))
-                remote_files = remote_data.get('files', {})
-                for rel in TRACKED_FILES:
-                    full = os.path.join(BASE_DIR, rel.replace('/', os.sep))
-                    rh = remote_files.get(rel, '')
-                    if rh and (not os.path.isfile(full) or _sha1_file(full) != rh):
-                        files_to_update.append(rel)
-
-            if not files_to_update:
-                self.send_json(200, {'ok': True, 'updated': [], 'message': '没有需要更新的文件'})
-                return
+                files_to_update = [rel for rel in TRACKED_FILES
+                                   if remote_files.get(rel) and remote_files.get(rel) != local_hashes.get(rel)]
 
             updated = []
             errors = []
             for rel in files_to_update:
-                # 安全校验：只允许追踪列表中的文件，防止路径穿越
-                if rel not in TRACKED_FILES:
-                    errors.append('%s: 不在追踪列表中，已跳过' % rel)
-                    continue
                 # 防路径穿越
                 full = os.path.normpath(os.path.join(BASE_DIR, rel.replace('/', os.sep)))
                 if not full.startswith(BASE_DIR):
                     errors.append('%s: 路径非法，已跳过' % rel)
                     continue
+                expect = remote_files.get(rel, '')
                 try:
-                    url = GITHUB_RAW + rel
+                    url = GITHUB_RAW + urllib.parse.quote(rel) + '?t=' + str(int(time.time()))
                     req = urllib.request.Request(url, headers={'User-Agent': 'NvCheckList/3.0'})
-                    with urllib.request.urlopen(req, timeout=30) as resp:
+                    with urllib.request.urlopen(req, timeout=60) as resp:
                         data = resp.read()
+                    # 完整性校验：下载内容与远程清单哈希一致才落盘
+                    if expect and hashlib.sha1(data).hexdigest() != expect:
+                        errors.append('%s: 下载内容与远程清单不符，为安全起见已跳过' % rel)
+                        continue
                     os.makedirs(os.path.dirname(full), exist_ok=True)
                     with open(full, 'wb') as f:
                         f.write(data)
@@ -363,22 +355,20 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception as e:
                     errors.append('%s: 下载失败 (%s)' % (rel, e))
 
-            # 更新本地 version.json
-            try:
-                req = urllib.request.Request(REMOTE_VERSION_URL, headers={'User-Agent': 'NvCheckList/3.0'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    remote_data = json.loads(resp.read().decode('utf-8'))
-                with open(os.path.join(BASE_DIR, 'version.json'), 'w', encoding='utf-8') as f:
-                    json.dump(remote_data, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass  # version.json 更新失败不影响主流程
+            # 全部成功时把本地 version.json 同步为远程清单（0 个文件更新也同步，
+            # 避免"有更新但无可下载文件"的提示反复出现）
+            if not errors:
+                try:
+                    with open(os.path.join(BASE_DIR, 'version.json'), 'w', encoding='utf-8') as f:
+                        json.dump(remote_data, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
 
-            need_restart = any(f in RESTART_FILES for f in updated)
             self.send_json(200, {
                 'ok': len(errors) == 0,
                 'updated': updated,
                 'errors': errors,
-                'needRestart': need_restart,
+                'needRestart': any(f in RESTART_FILES for f in updated),
                 'message': '已更新 %d 个文件' % len(updated),
             })
         except Exception as e:

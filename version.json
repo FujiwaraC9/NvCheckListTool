@@ -1,11 +1,11 @@
 {
-  "version": "3b88a68d",
+  "version": "v1.0.1",
   "files": {
-    "index.html": "650e49744ba6182d8db08192f92c269556d1471e",
-    "app.js": "1bdd019be44489a6f0a60ab76cf9d47ecf89bca3",
+    "index.html": "5897cbb155dff619ac0877517cc9b2fc04a10f72",
+    "app.js": "d7a39b79a510d15a0f96eeed9abc761312e8d7f1",
     "styles.css": "645b94bbdd0dadddec9f3412b4f6902e55a8ce0f",
-    "server.py": "bc2005198957b8a627a0fcf8fdec9a76b6771417",
-    "launch.bat": "be4c520742857e7404c7ca57fc3f6e08d8a198e1",
+    "server.py": "6a090579f985994093fce93a9d7f2096f96783df",
+    "启动启动通通启动.bat": "be4c520742857e7404c7ca57fc3f6e08d8a198e1",
     "lib/db.js": "e355032c3b64d5b4498a3c965fbfa685360960df",
     "lib/serial.js": "70cbdc735bda92bafdd82f8c1493e024cb360d0b",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",

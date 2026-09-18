@@ -1958,8 +1958,9 @@ async function applyUpdate(files) {
     }
     const restartHint = data.needRestart ? '\n\n本次更新包含 server.py / launch.bat，请重启本地服务（重新运行 launch.bat）后刷新页面。' : '';
     await modalAlert(
-      '更新完成！已更新 ' + data.updated.length + ' 个文件：\n' +
-      data.updated.join(', ') + restartHint + '\n\n请刷新页面（Ctrl+F5）以加载新版本。',
+      data.updated.length
+        ? '更新完成！已更新 ' + data.updated.length + ' 个文件：\n' + data.updated.join(', ') + restartHint + '\n\n请刷新页面（Ctrl+F5）以加载新版本。'
+        : '版本号已同步为最新，无需更新文件。',
       '更新成功', 'info'
     );
     location.reload();
@@ -1969,3 +1970,5 @@ async function applyUpdate(files) {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// update-test: v1.0.1 test marker (no functional change)
