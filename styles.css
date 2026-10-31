@@ -927,6 +927,13 @@ body {
   font-family: "Consolas", monospace;
   word-break: break-all;
 }
+/* FSG TAG 的来源说明（AT+QNVCONFIRM? / AT+QFSGVERSION?） */
+.svn-tag-source {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.svn-tag-source:empty { display: none; }
 /* FSG 表格 SVN 版本信息 */
 .svn-readonly-tag {
   display: inline-block;

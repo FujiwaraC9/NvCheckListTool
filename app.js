@@ -245,6 +245,8 @@ function bindDimensionEvents() {
       if (state.selection[key] === val) return;
       state.selection[key] = val;
       if (key === 'android_version') refreshCustomerOptions();
+      // 单软多硬改了，SVN 页的 FSG TAG 来源跟着实时切换
+      if (key === 'multi_hw') applyMultiHwToSvnTag(val);
       updateMatchedItems();
     };
 
@@ -888,9 +890,10 @@ async function runCheck() {
 
     // 同步设备版本到「SVN版本验证」页；单软多硬时 Tag 取 AT+QNVCONFIRM? 的值
     if (state.port && (atFullText || nvConfirm)) {
-      SvnCheck.setDeviceFromResponse(atFullText, nvConfirm);
+      const isMultiHw = state.selection.multi_hw === '是';
+      SvnCheck.setDeviceFromResponse(atFullText, nvConfirm, isMultiHw);
       logLine('设备版本已同步到「SVN版本验证」页' +
-        (nvConfirm ? '（单软多硬：Tag 取自 ' + AT_NVCONFIRM + '）' : ''), 'info');
+        (isMultiHw && nvConfirm ? '（单软多硬：Tag 取自 ' + AT_NVCONFIRM + '）' : ''), 'info');
     }
 
     // 2. 解析文件
@@ -1318,7 +1321,53 @@ function renderSvnDevice() {
   $('#svn-sw').textContent = d && d.sw ? d.sw : '--';
   $('#svn-rf').textContent = d && d.rf ? d.rf : '--';
   $('#svn-date').textContent = d && d.date ? d.date : '--';
+  renderSvnTagSource(d);
   updateSvnCheckBtn();
+}
+
+/** FSG TAG 下方的小字：标明当前 Tag 取自哪条 AT 指令 */
+function renderSvnTagSource(d) {
+  const el = $('#svn-tag-source');
+  if (!el) return;
+  if (!d || !d.tag) { el.textContent = ''; el.title = ''; return; }
+  const fromNv = !!d.tagFromNvConfirm;
+  el.textContent = '来源：' + (fromNv ? AT_NVCONFIRM : 'AT+QFSGVERSION?');
+  let title = '当前 FSG TAG 取自 ' + (fromNv ? AT_NVCONFIRM : 'AT+QFSGVERSION?');
+  if (!fromNv && d.nvConfirmTag) {
+    title += '；单软多硬设为「是」时会换成 ' + AT_NVCONFIRM + ' 的 Tag';
+  }
+  if (d.nvConfirmError) {
+    title += '；' + AT_NVCONFIRM + ' 读取失败：' + d.nvConfirmError;
+  }
+  el.title = title;
+}
+
+/**
+ * 单软多硬设置变化时实时切换 SVN 页 FSG TAG 的来源：
+ *   是 → AT+QNVCONFIRM? 的 Tag（还没读过则现场补读一次）
+ *   否 → AT+QFSGVERSION? 的 Tag
+ */
+async function applyMultiHwToSvnTag(val) {
+  const wantMultiHw = val === '是';
+  const d = SvnCheck.getDevice();
+  if (!d || !d.tag) return;   // 还没读过设备版本，无可切换
+  if (wantMultiHw && !d.nvConfirmTag && state.port) {
+    svnLog('补读 ' + AT_NVCONFIRM + ' 以切换 FSG TAG 来源 ...', 'info');
+    try {
+      await SvnCheck.readNvConfirm(state.port, (state.cfg && state.cfg.serial) || {});
+    } catch (e) {
+      svnLog(AT_NVCONFIRM + ' 补读失败：' + (e.message || e), 'warn');
+    }
+  }
+  SvnCheck.applyTagSource(wantMultiHw);
+  renderSvnDevice();
+  const nd = SvnCheck.getDevice();
+  if (nd && nd.tag) {
+    svnLog('FSG TAG 已切换为：' + nd.tag +
+      '（来自 ' + (nd.tagFromNvConfirm ? AT_NVCONFIRM : 'AT+QFSGVERSION?') + '）', 'info');
+  } else if (wantMultiHw) {
+    svnLog('未取得 ' + AT_NVCONFIRM + ' 的 Tag，FSG TAG 仍用 AT+QFSGVERSION? 的值', 'warn');
+  }
 }
 
 function updateSvnCheckBtn() {
@@ -1514,7 +1563,7 @@ async function svnImportFromHistory() {
 
 /** 用历史记录填充 SVN 页：设备信息 + 预选该记录的客户版本 */
 async function applySvnHistoryRecord(rec) {
-  const dev = SvnCheck.setDeviceFromResponse(rec.at_version || '', rec.nv_confirm || '');
+  const dev = SvnCheck.setDeviceFromResponse(rec.at_version || '', rec.nv_confirm || '', rec.multi_hw === '是');
   if (!dev.tag) {
     svnLog('该历史记录中未解析到 Tag，无法用于 SVN 检查', 'err');
     await modalAlert('该历史记录中未解析到 FSG TAG（at_version 为空或格式异常）。', '导入失败', 'error');
@@ -1576,8 +1625,8 @@ async function svnReadDevice() {
         (device.tagFromNvConfirm ? '（来自 ' + AT_NVCONFIRM + '）' : '（来自 AT+QFSGVERSION?）') +
         '，SW=' + (device.sw || '无') + '，RF=' + (device.rf || '无') + '，Date=' + (device.date || '无'), 'ok');
     }
-    if (device.nvConfirmError) {
-      svnLog(AT_NVCONFIRM + ' 读取失败：' + device.nvConfirmError + '，Tag 仍用 AT+QFSGVERSION? 的值', 'warn');
+    if (device.nvConfirmError && multiHw) {
+      svnLog(AT_NVCONFIRM + ' 读取失败：' + device.nvConfirmError + '，Tag 回退为 AT+QFSGVERSION? 的值', 'warn');
     }
     renderSvnDevice();
     // 已登录且表格未缓存：顺手拉取（供检查时匹配 sheet）
@@ -1753,17 +1802,14 @@ function bindEvents() {
   $('#btn-svn-from-history').addEventListener('click', svnImportFromHistory);
   $('#btn-svn-login').addEventListener('click', svnLogin);
   $('#svn-customer').addEventListener('change', updateSvnCheckBtn);
-  $('#svn-multi-hw').addEventListener('change', (e) => {
+  $('#svn-multi-hw').addEventListener('change', async (e) => {
     // 与「一键检查」页共用同一份值
     state.selection.multi_hw = e.target.value;
     syncDimensionUI();      // 同步「一键检查」页控件显示
     updateMatchedItems();
     svnLog('单软多硬已设为：' + (e.target.value || '未选择'), 'info');
-    const d = SvnCheck.getDevice();
-    if (d && (e.target.value === '是') !== !!d.tagFromNvConfirm) {
-      svnLog('当前 Tag 来源与单软多硬设置不一致（单软多硬需用 ' + AT_NVCONFIRM +
-        ' 的 Tag 定位），请重新「读取设备版本」或从历史记录导入', 'warn');
-    }
+    // 实时切换 FSG TAG 来源，不用重新读设备版本
+    await applyMultiHwToSvnTag(e.target.value);
   });
 
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
