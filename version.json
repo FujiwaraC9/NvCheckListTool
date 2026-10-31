@@ -1,19 +1,19 @@
 {
-  "version": "v1.0.1",
+  "version": "v1.0.2",
   "files": {
-    "index.html": "5897cbb155dff619ac0877517cc9b2fc04a10f72",
-    "app.js": "d7a39b79a510d15a0f96eeed9abc761312e8d7f1",
-    "styles.css": "645b94bbdd0dadddec9f3412b4f6902e55a8ce0f",
-    "server.py": "6a090579f985994093fce93a9d7f2096f96783df",
-    "启动启动通通启动.bat": "be4c520742857e7404c7ca57fc3f6e08d8a198e1",
-    "lib/db.js": "e355032c3b64d5b4498a3c965fbfa685360960df",
-    "lib/serial.js": "70cbdc735bda92bafdd82f8c1493e024cb360d0b",
+    "index.html": "9e61b4ba7517769238dcfdbdfa402261722ac4fa",
+    "app.js": "21d5e336cdb451aa2c36af74ce1c1afbe53bce5a",
+    "styles.css": "2711d14ea0d2430b77f25e52a4b4b646b09f7388",
+    "server.py": "ed164247358d246cade5d255995e948a6eac4154",
+    "启动启动通通启动.bat": "0262dd1f44677e489a2507f64a27fa5740135a02",
+    "lib/db.js": "eecfeaf557bb4624e7f216e1133bcd6b02adaded",
+    "lib/serial.js": "a2bfdf738030821bb73ccca8556260c16416ece2",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",
-    "lib/config-manager.js": "21b575b1cb61cc1e60f825442ef2be5ed372aa29",
-    "lib/excel-export.js": "e256dcefaa8e9ffd660608b8178a571ec715f9af",
-    "lib/svn-check.js": "4eb6bc7b1cc7fa6fb4355970b242e622f55d0982",
-    "lib/exceljs.min.js": "a519f8f754e5b3f9a9d38aad21810e4b1c923b83",
-    "config/default-checklist.js": "e308f76d05d5a1c04619956e26279592c064e765",
-    "config/default-checklist.json": "d75d6ef86ed59f9d73700b131d637afec566ae93"
+    "lib/config-manager.js": "aa350c4b029f035db292e264bfa905df9a79568c",
+    "lib/excel-export.js": "dc5827a822c16f242036bd9625d64ae4adac400b",
+    "lib/svn-check.js": "8a7705ebccfa2a51848be305f193b6fd1f5aca25",
+    "lib/exceljs.min.js": "a684fb1596d556e35254de69ef0c2c546cffa031",
+    "config/default-checklist.js": "7186a6e44756de132ac32026b308a6ec665b7813",
+    "config/default-checklist.json": "1fb796947f0164b2769441bc9818d1af15d7f190"
   }
 }

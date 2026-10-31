@@ -20,7 +20,7 @@ window.DEFAULT_CHECKLIST = {
       label: "安卓版本",
       order: 2,
       auto_read: { command: "AT+QGMR" },
-      options: ["9", "10", "12"]
+      options: ["9", "10", "12", "其他"]
     },
     {
       key: "customer",
@@ -38,6 +38,13 @@ window.DEFAULT_CHECKLIST = {
       label: "modem基线版本",
       order: 4,
       auto_read: { command: "AT+CGMR", strip_prefix: "BASE  Version:" }
+    },
+    {
+      key: "multi_hw",
+      label: "单软多硬",
+      order: 5,
+      auto_read: null,
+      options: ["是", "否"]
     }
   ],
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
   <title>NvCheckList - 展锐 NV 检查工具</title>
-  <link rel="stylesheet" href="styles.css?v=28">
+  <link rel="stylesheet" href="styles.css?v=36">
 </head>
 <body>
   <div class="app">
@@ -86,6 +86,7 @@
 
         <div class="card" id="result-card" style="display:none">
           <h2 class="card-title">检查结果 <span class="badge" id="result-badge">--</span></h2>
+          <div class="offline-notice" id="result-offline-box" style="display:none">离线模式检查结果（未连接设备，AT 相关信息未读取）</div>
           <div class="result-meta">
             <div class="meta-item"><span class="meta-label">模块型号</span><span id="result-module" class="meta-value">--</span></div>
             <div class="meta-item"><span class="meta-label">检查时间</span><span id="result-time" class="meta-value">--</span></div>
@@ -108,6 +109,10 @@
           <div class="result-at" id="result-at-box" style="display:none">
             <div class="meta-label">AT+QFSGVERSION?</div>
             <pre class="at-content" id="result-at"></pre>
+          </div>
+          <div class="result-at" id="result-nvconfirm-box" style="display:none">
+            <div class="meta-label">AT+QNVCONFIRM?（单软多硬）</div>
+            <pre class="at-content" id="result-nvconfirm"></pre>
           </div>
         </div>
       </section>
@@ -185,6 +190,9 @@
             <button class="btn" id="btn-svn-read">读取设备版本</button>
             <button class="btn" id="btn-svn-from-history">从历史记录导入</button>
             <select class="select" id="svn-customer" style="max-width:180px"></select>
+            <label class="svn-inline" title="单软多硬：连接设备时自动检测，也可手动选择；单软多硬时用 AT+QNVCONFIRM? 的 Tag 定位 FSG 表格">单软多硬
+              <select class="select" id="svn-multi-hw" style="max-width:110px"></select>
+            </label>
             <button class="btn btn-primary" id="btn-svn-check" disabled>检查 SVN 版本</button>
             <button class="btn" id="btn-svn-login">登录 SVN 账号</button>
           </div>
@@ -314,14 +322,14 @@
   <!-- 依赖脚本 -->
   <script src="lib/exceljs.min.js?v=21"></script>
   <!-- 配置本地快照（file:// 直开/断网兜底，须在 config-manager 之前） -->
-  <script src="config/default-checklist.js?v=20"></script>
+  <script src="config/default-checklist.js?v=35"></script>
   <!-- 应用脚本 -->
   <script src="lib/db.js?v=29"></script>
   <script src="lib/serial.js?v=20"></script>
   <script src="lib/nvm-parser.js?v=20"></script>
-  <script src="lib/config-manager.js?v=20"></script>
-  <script src="lib/excel-export.js?v=29"></script>
-  <script src="lib/svn-check.js?v=29"></script>
-  <script src="app.js?v=30"></script>
+  <script src="lib/config-manager.js?v=35"></script>
+  <script src="lib/excel-export.js?v=34"></script>
+  <script src="lib/svn-check.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

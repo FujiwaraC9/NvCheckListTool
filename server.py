@@ -24,6 +24,8 @@ import hashlib
 import urllib.parse
 import urllib.request
 import urllib.error
+import re
+import subprocess
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 # 仅放行的“读”类 WebDAV/HTTP 方法（全大写）。任何写操作都不在其中，会被 405 拒绝。
@@ -39,6 +41,19 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PORT = 8765
+
+# ---- 单软多硬检测（adb 读 /proc/cmdline 的 rfboard.id）----
+# 按顺序尝试：部分设备 /proc/cmdline 免 root 即可读；带引号的那条兼容 adb 直接拼接参数的旧行为
+ADB_CMDLINE_COMMANDS = [
+    # eng/root 设备可免 root 直读
+    ['adb', 'shell', 'cat', '/proc/cmdline'],
+    # 老式 su（su <uid> <命令...>），实测这类设备 -c 不可用
+    ['adb', 'shell', 'su', '0', 'cat', '/proc/cmdline'],
+    ['adb', 'shell', "su 0 sh -c 'cat /proc/cmdline'"],
+    # 新式 su（toybox 的 -c 语法）
+    ['adb', 'shell', 'su', '-c', 'cat /proc/cmdline'],
+]
+ADB_TIMEOUT = 15
 
 # ---- 更新机制 ----
 # GitHub 仓库地址（raw 文件直链基础）
@@ -165,6 +180,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.handle_svn_proxy(parsed, method)
         elif parsed.path == '/api/update/check' and method == 'GET':
             self.handle_update_check()
+        elif parsed.path == '/api/device/rfboard' and method == 'GET':
+            self.handle_device_rfboard()
         else:
             # 非代理路径只接受普通 GET/HEAD/OPTIONS 静态访问
             if method == 'GET':
@@ -173,6 +190,62 @@ class Handler(SimpleHTTPRequestHandler):
                 super().do_HEAD()
             else:
                 self.send_error(405, 'Method Not Allowed')
+
+    # ---- 单软多硬检测：adb 读 /proc/cmdline，解析 rfboard.id ----
+    def handle_device_rfboard(self):
+        """判断设备是否单软多硬项目。
+
+        规则：rfboard.id 为 -1 或找不到（含无输出）→ 非单软多硬；非负值 → 单软多硬。
+        执行的命令是写死在白名单里的，不接受客户端传入任何参数。
+        """
+        raw, err = '', ''
+        for args in ADB_CMDLINE_COMMANDS:
+            try:
+                proc = subprocess.run(
+                    args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=ADB_TIMEOUT,
+                )
+            except FileNotFoundError:
+                err = '本机没有 adb（未安装或不在 PATH 中）'
+                break
+            except subprocess.TimeoutExpired:
+                err = 'adb 命令超时'
+                continue
+            except OSError as e:
+                err = 'adb 执行失败: %s' % e
+                break
+
+            out = proc.stdout.decode('utf-8', 'replace').strip()
+            errout = proc.stderr.decode('utf-8', 'replace').strip()
+            if out:
+                raw = out
+            if 'rfboard.id' in out:
+                err = ''
+                break
+            if not err and errout:
+                err = errout.splitlines()[0][:200]
+
+        if not raw:
+            hint = '（读取 /proc/cmdline 需要 root，请确认设备 su 可用并已授权 adb）'
+            self.send_json(200, {
+                'ok': False, 'multi_hw': None, 'rfboard_id': None, 'raw': '',
+                'error': (err + ' ' + hint) if err else ('未获取到 /proc/cmdline 内容 ' + hint),
+            })
+            return
+
+        matches = re.findall(r'rfboard\.id=(-?[0-9a-zA-Z]+)', raw)
+        board_id, multi = None, False
+        if matches:
+            try:
+                board_id = int(matches[-1], 0)
+            except ValueError:
+                board_id = None
+            if board_id is not None:
+                multi = board_id >= 0
+        self.send_json(200, {
+            'ok': True, 'multi_hw': multi, 'rfboard_id': board_id,
+            'raw': raw[:4000],
+            'error': '' if matches else '未找到 rfboard.id，按非单软多硬处理',
+        })
 
     def handle_svn_proxy(self, parsed, method):
         # 二次兜底校验（理论上调用方已过滤）

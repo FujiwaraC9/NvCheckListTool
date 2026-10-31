@@ -346,6 +346,7 @@ body {
 /* ===== 状态卡片 ===== */
 .status-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 24px;
   justify-content: space-between;
@@ -441,6 +442,16 @@ body {
 .meta-item { display: flex; flex-direction: column; gap: 4px; }
 .meta-label { font-size: 13px; color: var(--text-secondary); }
 .meta-value { font-size: 15px; font-weight: 500; color: var(--text-heading); }
+/* 未连接设备时的结果标注 */
+.offline-notice {
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--warn-title);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-note-border, var(--warn));
+}
 .badge {
   display: inline-block;
   padding: 2px 10px;
@@ -521,6 +532,19 @@ body {
 .cell-pass { color: var(--pass); font-weight: 600; }
 .cell-fail { color: var(--fail); font-weight: 600; }
 .cell-fail-text { color: var(--fail-text); font-size: 13px; font-family: "Consolas", monospace; white-space: pre-line; max-width: 300px; }
+/* 历史记录里的单软多硬标记 */
+.tag-mh {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: var(--text-secondary);
+  background: var(--bg-hover-strong);
+}
+.tag-mh.on { color: var(--warn-title); background: var(--warn-bg); }
 
 /* ===== 筛选栏 ===== */
 .filter-bar {
@@ -700,6 +724,57 @@ body {
 }
 .dimension-item .select,
 .dimension-item .input { width: 100%; box-sizing: border-box; }
+
+/* ===== 自绘下拉框（可手输 + 候选列表，替代浏览器原生 datalist） ===== */
+.combo { position: relative; }
+.combo .dim-input { width: 100%; box-sizing: border-box; }
+.combo:not(.combo-plain) .dim-input { padding-right: 30px; }
+.combo-toggle {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.combo-toggle:hover { color: var(--accent-text); background: var(--bg-hover-strong); }
+.combo-list {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+.combo-option {
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 13.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.combo-option:hover { background: var(--accent-bg); color: var(--accent-text); }
+/* 维度输入框下方提示（如安卓版本识别为「其他」） */
+.dimension-item .dim-hint:not(:empty) {
+  font-size: 11.5px;
+  color: var(--warn-title);
+  line-height: 1.4;
+}
 
 /* 注意事项自动展示 */
 .notes-box {
@@ -903,6 +978,15 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+/* SVN 操作行里的「单软多硬」内联标签 */
+.svn-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .cell-result { font-weight: 700; }
 .cell-result.pass { color: var(--pass); }

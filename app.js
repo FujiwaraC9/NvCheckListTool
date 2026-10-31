@@ -156,10 +156,8 @@ function checkBrowserSupport() {
 
 /**
  * 渲染维度选择区（v3）
- * - platform：下拉（自动读取 AT+QGMR，读出后自动选中；也可手动选）
- * - android_version：下拉（手动，读取方法待定）
- * - customer：下拉（选项随安卓版本联动，即客户版本）
- * - baseline：文本框（自动读取 AT+CGMR，读出后自动填充；可手动修改）
+ * 所有维度统一为「自定义下拉框 + 可手动输入」的控件（自绘候选列表，不用浏览器原生 datalist），
+ * 插了设备会自动填入读到的值，没插设备或想改都支持手动修改。
  */
 function renderDimensions() {
   const grid = $('#dimension-grid');
@@ -174,73 +172,154 @@ function renderDimensions() {
       ? '<span class="auto-tag">自动读取 ' + escapeHtml(d.auto_read.command) + '</span>'
       : (d.auto_read_hint ? '<span class="auto-tag">' + escapeHtml(d.auto_read_hint) + '</span>' : '');
 
-    let control;
-    if (d.key === 'baseline' || (!d.options && !d.options_by)) {
-      // 基线：自由文本输入（自动填充，可手改）
-      control = '<input type="text" class="input dim-input" data-key="' + d.key + '" ' +
-        'placeholder="连接串口后自动读取" value="' + escapeHtml(state.selection[d.key] || '') + '">';
-    } else {
-      // 下拉：选项固定或联动
-      const opts = ConfigManager.getDimOptions(d, state.selection);
-      const optHtml = (opts || []).map(o =>
-        '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
-      control = '<select class="select dim-select" data-key="' + d.key + '">' +
-        '<option value="">（未选择）</option>' + optHtml + '</select>';
-    }
-    item.innerHTML = '<label>' + escapeHtml(d.label) + autoTag + '</label>' + control;
+    const hasOptions = !!(d.options || d.options_by);
+    const placeholder = d.key === 'baseline' ? '连接串口自动读取，也可手动填写' : '请选择或输入';
+    const control =
+      '<div class="combo' + (hasOptions ? '' : ' combo-plain') + '">' +
+      '<input type="text" class="input dim-input" data-key="' + d.key + '" autocomplete="off"' +
+      ' placeholder="' + escapeHtml(placeholder) + '"' +
+      ' value="' + escapeHtml(state.selection[d.key] || '') + '">' +
+      (hasOptions ? '<button type="button" class="combo-toggle" tabindex="-1" aria-label="展开候选">▾</button>' : '') +
+      '<div class="combo-list" hidden></div>' +
+      '</div>';
+    item.innerHTML = '<label>' + escapeHtml(d.label) + autoTag + '</label>' + control +
+      '<div class="dim-hint" data-key="' + d.key + '"></div>';
     grid.appendChild(item);
   }
+  refreshAllComboLists();
   bindDimensionEvents();
   syncDimensionUI();
   updateMatchedItems();
 }
 
-function bindDimensionEvents() {
-  $$('.dim-select').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const key = sel.dataset.key;
-      state.selection[key] = sel.value;
-      if (key === 'android_version') {
-        // 安卓版本变化 → 刷新客户版本选项并清空已选
-        state.selection.customer = '';
-        refreshCustomerOptions();
-      }
-      updateMatchedItems();
-    });
+/** 取某维度控件内的候选列表元素 */
+function comboListOf(key) {
+  const inp = $('.dim-input[data-key="' + key + '"]');
+  return inp ? inp.parentElement.querySelector('.combo-list') : null;
+}
+
+/** 用当前候选重新填充某维度的自绘下拉列表 */
+function refreshComboList(key) {
+  const list = comboListOf(key);
+  if (!list) return;
+  const dim = ConfigManager.getDimension(key);
+  const opts = (dim && (dim.options || dim.options_by))
+    ? (ConfigManager.getDimOptions(dim, state.selection) || []) : [];
+  list.innerHTML = opts.map(o =>
+    '<div class="combo-option" data-value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</div>').join('');
+}
+
+function refreshAllComboLists() {
+  for (const d of ConfigManager.getDimensions()) refreshComboList(d.key);
+}
+
+function openCombo(inp) {
+  const list = inp.parentElement.querySelector('.combo-list');
+  if (!list || !list.children.length) return;
+  $$('.combo-list').forEach(l => { if (l !== list) l.hidden = true; });
+  list.hidden = false;
+}
+
+function closeCombo(inp) {
+  const list = inp.parentElement.querySelector('.combo-list');
+  if (list) list.hidden = true;
+}
+
+/** 按输入内容过滤候选；无匹配时自动收起 */
+function filterComboList(list, keyword) {
+  const kw = (keyword || '').trim().toLowerCase();
+  let visible = 0;
+  Array.from(list.children).forEach(el => {
+    const hit = !kw || (el.dataset.value || '').toLowerCase().includes(kw);
+    el.style.display = hit ? '' : 'none';
+    if (hit) visible++;
   });
+  list.hidden = visible === 0;
+}
+
+function bindDimensionEvents() {
   $$('.dim-input').forEach(inp => {
-    inp.addEventListener('change', () => {
-      state.selection[inp.dataset.key] = inp.value.trim();
+    const list = inp.parentElement.querySelector('.combo-list');
+    const commit = () => {
+      const key = inp.dataset.key;
+      const val = inp.value.trim();
+      if (state.selection[key] === val) return;
+      state.selection[key] = val;
+      if (key === 'android_version') refreshCustomerOptions();
+      updateAndroidHint();
       updateMatchedItems();
+    };
+
+    inp.addEventListener('change', commit);
+    inp.addEventListener('input', () => {
+      if (!list) return;
+      filterComboList(list, inp.value);
+      if (!list.hidden) openCombo(inp);
     });
+    inp.addEventListener('focus', () => {
+      if (!list) return;
+      filterComboList(list, '');
+      openCombo(inp);
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && list) closeCombo(inp);
+    });
+    inp.addEventListener('blur', () => { if (list) closeCombo(inp); });
+
+    if (list) {
+      // mousedown 抢在 blur 收起之前取值，避免候选被隐藏后点不中
+      list.addEventListener('mousedown', (e) => {
+        const opt = e.target.closest('.combo-option');
+        if (!opt) return;
+        e.preventDefault();
+        inp.value = opt.dataset.value || '';
+        closeCombo(inp);
+        commit();
+      });
+    }
+
+    const toggle = inp.parentElement.querySelector('.combo-toggle');
+    if (toggle) {
+      toggle.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // 防止 input 先失焦把列表关掉
+        if (list && list.hidden) { filterComboList(list, ''); openCombo(inp); inp.focus(); }
+        else closeCombo(inp);
+      });
+    }
   });
 }
 
-/** 安卓版本变化后刷新客户版本下拉选项 */
+/** 刷新客户版本候选：随安卓版本联动，「其他」时汇总所有客户选项 */
 function refreshCustomerOptions() {
-  const customerSel = $('.dim-select[data-key="customer"]');
-  if (!customerSel) return;
   const dim = ConfigManager.getDimension('customer');
+  if (!dim) return;
   const opts = ConfigManager.getDimOptions(dim, state.selection) || [];
-  customerSel.innerHTML = '<option value="">（未选择）</option>' +
-    opts.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
-  customerSel.value = '';
-  customerSel.disabled = opts.length === 0;
+  refreshComboList('customer');
+  // 已选客户版本不在新候选内 → 清空，避免留下无效组合
+  if (state.selection.customer && opts.length > 0 && !opts.includes(state.selection.customer)) {
+    state.selection.customer = '';
+    const inp = $('.dim-input[data-key="customer"]');
+    if (inp) inp.value = '';
+  }
+}
+
+/** 安卓版本输入非 9/10/12 时提示按「其他」匹配 */
+function updateAndroidHint() {
+  const hint = $('.dim-hint[data-key="android_version"]');
+  if (!hint) return;
+  const raw = state.selection.android_version || '';
+  hint.textContent = (raw && raw !== '其他' && ConfigManager.effectiveAndroid(raw) === '其他')
+    ? '识别为「其他」：只检查不限制安卓版本的通用项'
+    : '';
 }
 
 /** 把 state.selection 同步到 UI 控件 */
 function syncDimensionUI() {
-  $$('.dim-select').forEach(sel => {
-    sel.value = state.selection[sel.dataset.key] || '';
-  });
+  refreshCustomerOptions();
   $$('.dim-input').forEach(inp => {
     inp.value = state.selection[inp.dataset.key] || '';
   });
-  refreshCustomerOptions();
-  const customerSel = $('.dim-select[data-key="customer"]');
-  if (customerSel && state.selection.customer) {
-    customerSel.value = state.selection.customer;
-  }
+  updateAndroidHint();
 }
 
 /**
@@ -322,13 +401,14 @@ function updateRunButton() {
     btn.textContent = '正在读取设备信息...';
     return;
   }
-  // 必选维度：有 options/options_by 的维度（下拉型）必须已选择
+  // 必选维度：有 options/options_by 的维度必须已选择
   const dims = ConfigManager.getDimensions();
   const missingDims = dims.filter(d => (d.options || d.options_by) && !state.selection[d.key]);
   const activeItems = ConfigManager.getActiveItems(state.selection);
-  const ready = state.port && state.dirHandle && missingDims.length === 0 && activeItems.length > 0;
+  // 串口非必填：项目信息可以手动填写，只有 AT 相关功能需要连设备
+  const ready = state.dirHandle && missingDims.length === 0 && activeItems.length > 0;
   btn.disabled = !ready;
-  if (state.port && state.dirHandle && missingDims.length === 0 && activeItems.length === 0) {
+  if (state.dirHandle && missingDims.length === 0 && activeItems.length === 0) {
     btn.textContent = '无匹配检查项';
   } else {
     btn.textContent = '开始检查';
@@ -346,12 +426,11 @@ function updateRunButton() {
 /**
  * "开始检查"按钮被禁用时，返回原因提示文案（用于鼠标悬停浮动提示）。
  * 按操作流程顺序给出第一个未满足的条件：
- * 串口 → 必选维度（平台/安卓版本/客户版本等） → 项目文件夹 → 匹配检查项。
+ * 必选维度（平台/安卓版本/客户版本等） → 项目文件夹 → 匹配检查项。
  * @returns {string} 提示文案，为空表示无需提示（按钮可用或正在读取）
  */
 function getRunTipMessage() {
   if (state.autoReading) return '';
-  if (!state.port) return '请连接串口';
   const dims = ConfigManager.getDimensions();
   const missing = dims.filter(d => (d.options || d.options_by) && !state.selection[d.key]);
   if (missing.length > 0) return '请选择' + missing[0].label;
@@ -613,6 +692,8 @@ async function autoReadDimensions() {
       logLine('  未能从 ' + cmd + ' 响应中解析 ' + d.label + '，请手动选择/填写', 'warn');
     }
   }
+  // 单软多硬：与 AT 指令一起自动检测（本地服务用 adb 读 /proc/cmdline 的 rfboard.id）
+  await detectMultiHw();
   syncDimensionUI();
   updateMatchedItems();
 }
@@ -674,6 +755,36 @@ function baselineKind(baseline) {
   return 'xml';
 }
 
+/** 单软多硬项目额外查询的 AT 指令 */
+const AT_NVCONFIRM = 'AT+QNVCONFIRM?';
+
+/**
+ * 单软多硬自动检测：由本地服务执行 adb 读 /proc/cmdline，解析 rfboard.id
+ * （服务端接口 /api/device/rfboard）。检测成功自动填入下拉框，之后仍可手动修改。
+ * @returns {string|null} '是' / '否'，检测失败返回 null
+ */
+async function detectMultiHw() {
+  if (!ConfigManager.getDimension('multi_hw')) return null;
+  logLine('检测单软多硬（adb 读 rfboard.id）...', 'info');
+  try {
+    const resp = await fetch('/api/device/rfboard?_t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data || !data.ok) {
+      logLine('  单软多硬检测失败：' + ((data && data.error) || '未知原因') + '，请手动选择', 'warn');
+      return null;
+    }
+    const val = data.multi_hw ? '是' : '否';
+    state.selection.multi_hw = val;
+    logLine('  rfboard.id=' + (data.rfboard_id == null ? '未找到' : data.rfboard_id) +
+      ' → 单软多硬：' + val + '（可手动修改）', 'ok');
+    return val;
+  } catch (e) {
+    logLine('  单软多硬检测失败：' + e.message + '，请手动选择', 'warn');
+    return null;
+  }
+}
+
 /**
  * 核心检查流程（v3）
  */
@@ -691,11 +802,6 @@ async function runCheck() {
   }
   if (missing.length > 0) {
     await modalAlert('请先选择：' + missing.join('、') + '，未选择不能开始检测。', '无法开始检测', 'warn');
-    updateRunButton();
-    return;
-  }
-  if (!state.port) {
-    await modalAlert('请先连接串口，未连接不能开始检测。', '无法开始检测', 'warn');
     updateRunButton();
     return;
   }
@@ -736,34 +842,62 @@ async function runCheck() {
 
   const cfg = state.cfg;
   try {
-    // 1. AT 查询模块型号
-    logLine('[1/3] 查询 AT+QFSGVERSION?  ...', 'step');
+    // 1. AT 查询模块型号（只有此步依赖设备；未连串口则跳过，其余检查照常）
     let atFullText = '';
-    let module = null;
-    try {
-      const resp = await Serial.sendAT(state.port, cfg.serial.at_command, {
-        baudrate: cfg.serial.baudrate,
-        timeout_ms: cfg.serial.response_timeout_ms,
-      });
-      logLine('收到响应（' + resp.length + ' 字节）', 'info');
-      const parsed = Serial.parseQfsgversion(resp);
-      atFullText = parsed.atFullText;
-      module = parsed.module;
-      // 同步设备版本信息到「SVN版本验证」页，免去在那里重复读取
-      SvnCheck.setDeviceFromResponse(resp);
-      if (module) {
-        logLine('模块型号: ' + module, 'ok');
-        logLine('设备版本已同步到「SVN版本验证」页', 'info');
-      } else {
-        logLine('响应中未找到 Tag:', 'warn');
+    let module = '未读取';
+    if (state.port) {
+      logLine('[1/3] 查询 AT+QFSGVERSION?  ...', 'step');
+      try {
+        const resp = await Serial.sendAT(state.port, cfg.serial.at_command, {
+          baudrate: cfg.serial.baudrate,
+          timeout_ms: cfg.serial.response_timeout_ms,
+        });
+        logLine('收到响应（' + resp.length + ' 字节）', 'info');
+        const parsed = Serial.parseQfsgversion(resp);
+        atFullText = parsed.atFullText;
+        module = parsed.module;
+        if (module) {
+          logLine('模块型号: ' + module, 'ok');
+        } else {
+          logLine('响应中未找到 Tag:', 'warn');
+        }
+      } catch (e) {
+        logLine('串口查询失败: ' + e.message, 'err');
+        throw e;
       }
-    } catch (e) {
-      logLine('串口查询失败: ' + e.message, 'err');
-      throw e;
+
+      if (!module) {
+        throw new Error('未获取到模块型号（Tag 不存在）');
+      }
+    } else {
+      logLine('[1/3] 未连接串口，跳过设备信息查询（AT+QFSGVERSION?），仅按所选项目信息检查', 'info');
     }
 
-    if (!module) {
-      throw new Error('未获取到模块型号（Tag 不存在）');
+    // 1b. 单软多硬项目：额外查询 AT+QNVCONFIRM?，打印值随结果一起输出
+    let nvConfirm = '';
+    if (state.selection.multi_hw === '是') {
+      if (state.port) {
+        logLine('单软多硬项目，查询 ' + AT_NVCONFIRM + ' ...', 'info');
+        try {
+          nvConfirm = await Serial.sendAT(state.port, AT_NVCONFIRM, {
+            baudrate: cfg.serial.baudrate,
+            timeout_ms: cfg.serial.response_timeout_ms,
+          });
+          logLine('  ' + AT_NVCONFIRM + ' 打印值已获取（' +
+            nvConfirm.split(/\r?\n/).filter(l => l.trim()).length + ' 行）', 'ok');
+        } catch (e) {
+          logLine('  ' + AT_NVCONFIRM + ' 查询失败: ' + e.message, 'warn');
+        }
+      } else {
+        logLine('  单软多硬项目但未连接串口，无法读取 ' + AT_NVCONFIRM + ' 打印值', 'warn');
+      }
+    }
+
+    // 同步设备版本到「SVN版本验证」页；单软多硬时 Tag 取 AT+QNVCONFIRM? 的值
+    if (state.port && (atFullText || nvConfirm)) {
+      SvnCheck.setDeviceFromResponse(atFullText, nvConfirm);
+      logLine('设备版本已同步到「SVN版本验证」页' +
+        (nvConfirm ? '（单软多硬：Tag 取自 ' + AT_NVCONFIRM + '）' : ''), 'info');
     }
 
     // 2. 解析文件
@@ -829,6 +963,9 @@ async function runCheck() {
     const record = {
       module,
       at_version: atFullText,
+      nv_confirm: nvConfirm,        // 单软多硬项目的 AT+QNVCONFIRM? 打印值
+      multi_hw: state.selection.multi_hw || '',  // 单软多硬标记
+      offline: !state.port,         // 未连接设备 → 离线模式检查结果
       results,
       fail_text: failLines.join('\n'),
       overall: allPass ? 'pass' : 'fail',
@@ -862,6 +999,8 @@ function showResultCard(rec, activeItems) {
   badge.className = 'badge ' + rec.overall;
   $('#result-module').textContent = rec.module;
   $('#result-time').textContent = formatDateTime(rec.timestamp);
+  // 未连接设备跑出来的结果 → 标注为离线模式检查结果
+  $('#result-offline-box').style.display = rec.offline ? '' : 'none';
 
   const tbody = $('#result-tbody');
   tbody.innerHTML = '';
@@ -884,7 +1023,6 @@ function showResultCard(rec, activeItems) {
       actual = (mismatch ? '<span style="color:var(--fail);font-weight:600">' : '') + escapeHtml(r.raw) + (mismatch ? '</span>' : '');
       fileCell = escapeHtml(r.file || '-');
     }
-
     tr.innerHTML =
       '<td class="mono">' + escapeHtml(item.name) + '</td>' +
       '<td class="mono">' + expect + '</td>' +
@@ -900,6 +1038,14 @@ function showResultCard(rec, activeItems) {
     $('#result-at').textContent = rec.at_version;
   } else {
     $('#result-at-box').style.display = 'none';
+  }
+
+  // 单软多硬项目：展示 AT+QNVCONFIRM? 打印值
+  if (rec.nv_confirm) {
+    $('#result-nvconfirm-box').style.display = '';
+    $('#result-nvconfirm').textContent = rec.nv_confirm;
+  } else {
+    $('#result-nvconfirm-box').style.display = 'none';
   }
 }
 
@@ -970,7 +1116,12 @@ function renderHistoryTable() {
         const selText = rec.selection
           ? Object.entries(rec.selection).filter(([, v]) => v).map(([k, v]) => k + '=' + v).join('，')
           : '';
-        mainCell = escapeHtml(rec.module || '-') +
+        // 单软多硬标记（老记录没有该字段则不显示）
+        const mhText = rec.multi_hw === '是' ? '单软多硬'
+          : (rec.multi_hw === '否' ? '非单软多硬' : '');
+        const mhBadge = mhText
+          ? ' <span class="tag-mh' + (rec.multi_hw === '是' ? ' on' : '') + '">' + mhText + '</span>' : '';
+        mainCell = escapeHtml(rec.module || '-') + mhBadge +
           (selText ? '<br><span style="font-size:12px;color:var(--text-muted)">' + escapeHtml(selText) + '</span>' : '');
       }
       tr.innerHTML =
@@ -1119,6 +1270,22 @@ function svnLog(msg, type = 'info') {
   panel.scrollTop = panel.scrollHeight;
 }
 
+/**
+ * 填充 SVN 页的「单软多硬」下拉框。
+ * 与「一键检查」页共用 state.selection.multi_hw：任一处修改两边同步；
+ * 连设备时由 detectMultiHw() 自动检测填入，也可手动选。
+ */
+function fillSvnMultiHwSelect() {
+  const sel = $('#svn-multi-hw');
+  if (!sel) return;
+  const dim = ConfigManager.getDimension('multi_hw');
+  const opts = (dim && dim.options) ? dim.options : ['是', '否'];
+  const cur = state.selection.multi_hw || '';
+  sel.innerHTML = '<option value="">（未选择）</option>' +
+    opts.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
+  sel.value = opts.includes(cur) ? cur : '';
+}
+
 /** 进入 SVN 页时刷新：设备信息（含一键检查同步）、串口状态、客户版本下拉、登录按钮、后台缓存表格 */
 function refreshSvnPage() {
   const portConnected = !!state.port;
@@ -1135,6 +1302,8 @@ function refreshSvnPage() {
   renderSvnMeta();   // 已缓存的表格版本信息（若有）
   // 客户版本下拉：本地配置选项，一键检查选过则预选
   fillSvnCustomerSelect();
+  // 单软多硬下拉（与一键检查页共用同一份值）
+  fillSvnMultiHwSelect();
   // 登录按钮状态
   const loginBtn = $('#btn-svn-login');
   if (loginBtn) loginBtn.textContent = SvnCheck.hasAuth() ? ('SVN账号：' + SvnCheck.getUser()) : '登录 SVN 账号';
@@ -1352,15 +1521,22 @@ async function svnImportFromHistory() {
 
 /** 用历史记录填充 SVN 页：设备信息 + 预选该记录的客户版本 */
 async function applySvnHistoryRecord(rec) {
-  const dev = SvnCheck.setDeviceFromResponse(rec.at_version || '');
+  const dev = SvnCheck.setDeviceFromResponse(rec.at_version || '', rec.nv_confirm || '');
   if (!dev.tag) {
     svnLog('该历史记录中未解析到 Tag，无法用于 SVN 检查', 'err');
     await modalAlert('该历史记录中未解析到 FSG TAG（at_version 为空或格式异常）。', '导入失败', 'error');
     return;
   }
+  // 同步该记录里的单软多硬标记（决定 Tag 取哪条指令的值）
+  if (rec.multi_hw) {
+    state.selection.multi_hw = rec.multi_hw;
+    fillSvnMultiHwSelect();
+  }
   const cust = rec.selection && rec.selection.customer;
   svnLog('已从历史记录导入（' + formatDateTime(rec.timestamp) + '，模块 ' + rec.module + '）：' +
-    'Tag=' + dev.tag + '，SW=' + (dev.sw || '无') + '，RF=' + (dev.rf || '无') + '，Date=' + (dev.date || '无'), 'ok');
+    '单软多硬=' + (rec.multi_hw || '未标记') +
+    '，Tag=' + dev.tag + (dev.tagFromNvConfirm ? '（来自 ' + AT_NVCONFIRM + '）' : '（来自 AT+QFSGVERSION?）') +
+    '，SW=' + (dev.sw || '无') + '，RF=' + (dev.rf || '无') + '，Date=' + (dev.date || '无'), 'ok');
   renderSvnDevice();
   // 预选该记录保存的客户版本
   const sel = $('#svn-customer');
@@ -1386,14 +1562,29 @@ async function svnReadDevice() {
   const oldText = btn.textContent;
   btn.textContent = '读取中...';
   try {
+    // 未选择单软多硬时先自动检测一次（连了设备即可，无需额外按钮）
+    if (!state.selection.multi_hw) {
+      const mh = await detectMultiHw();
+      fillSvnMultiHwSelect();
+      if (mh) svnLog('单软多硬自动检测结果：' + mh, 'ok');
+      else svnLog('单软多硬自动检测失败，请手动选择（它决定 Tag 取哪条指令的值）', 'warn');
+    }
+    const multiHw = state.selection.multi_hw === '是';
+
     const ser = (state.cfg && state.cfg.serial) || {};
     svnLog('发送 AT+QFSGVERSION? ...', 'info');
-    const { device, resp } = await SvnCheck.readDevice(state.port, ser);
+    if (multiHw) svnLog('单软多硬项目：将额外读取 ' + AT_NVCONFIRM + ' 并用其 Tag 定位', 'info');
+    const { device, resp } = await SvnCheck.readDevice(state.port, ser, { multiHw });
     if (!device.tag) {
       svnLog('未从响应中解析到 Tag，请确认设备支持该命令。原始响应见下', 'warn');
       svnLog(resp.replace(/\s+$/g, ''), 'info');
     } else {
-      svnLog('读取成功：Tag=' + device.tag + '，SW=' + (device.sw || '无') + '，RF=' + (device.rf || '无') + '，Date=' + (device.date || '无'), 'ok');
+      svnLog('读取成功：Tag=' + device.tag +
+        (device.tagFromNvConfirm ? '（来自 ' + AT_NVCONFIRM + '）' : '（来自 AT+QFSGVERSION?）') +
+        '，SW=' + (device.sw || '无') + '，RF=' + (device.rf || '无') + '，Date=' + (device.date || '无'), 'ok');
+    }
+    if (device.nvConfirmError) {
+      svnLog(AT_NVCONFIRM + ' 读取失败：' + device.nvConfirmError + '，Tag 仍用 AT+QFSGVERSION? 的值', 'warn');
     }
     renderSvnDevice();
     // 已登录且表格未缓存：顺手拉取（供检查时匹配 sheet）
@@ -1569,6 +1760,18 @@ function bindEvents() {
   $('#btn-svn-from-history').addEventListener('click', svnImportFromHistory);
   $('#btn-svn-login').addEventListener('click', svnLogin);
   $('#svn-customer').addEventListener('change', updateSvnCheckBtn);
+  $('#svn-multi-hw').addEventListener('change', (e) => {
+    // 与「一键检查」页共用同一份值
+    state.selection.multi_hw = e.target.value;
+    syncDimensionUI();      // 同步「一键检查」页控件显示
+    updateMatchedItems();
+    svnLog('单软多硬已设为：' + (e.target.value || '未选择'), 'info');
+    const d = SvnCheck.getDevice();
+    if (d && (e.target.value === '是') !== !!d.tagFromNvConfirm) {
+      svnLog('当前 Tag 来源与单软多硬设置不一致（单软多硬需用 ' + AT_NVCONFIRM +
+        ' 的 Tag 定位），请重新「读取设备版本」或从历史记录导入', 'warn');
+    }
+  });
 
   $('#btn-filter-apply').addEventListener('click', applyHistoryFilter);
   $('#btn-filter-reset').addEventListener('click', () => {
@@ -1691,6 +1894,8 @@ async function showRecordDetail(rec) {
   lines.push('模块型号: ' + rec.module);
   lines.push('检查时间: ' + formatDateTime(rec.timestamp));
   lines.push('总体结果: ' + rec.overall.toUpperCase());
+  lines.push('单软多硬: ' + (rec.multi_hw || '未标记'));
+  if (rec.offline) lines.push('检查方式: 离线模式检查结果（未连接设备）');
   if (rec.selection) {
     const labelMap = {};
     ConfigManager.getDimensions().forEach(d => { labelMap[d.key] = d.label; });
@@ -1728,6 +1933,11 @@ async function showRecordDetail(rec) {
     lines.push('');
     lines.push('AT+QFSGVERSION? 响应:');
     lines.push(rec.at_version);
+  }
+  if (rec.nv_confirm) {
+    lines.push('');
+    lines.push('AT+QNVCONFIRM? 打印值（单软多硬）:');
+    lines.push(rec.nv_confirm);
   }
   await showModal({
     title: '检查记录详情',
