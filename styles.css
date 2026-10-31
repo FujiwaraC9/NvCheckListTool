@@ -769,13 +769,6 @@ body {
   cursor: pointer;
 }
 .combo-option:hover { background: var(--accent-bg); color: var(--accent-text); }
-/* 维度输入框下方提示（如安卓版本识别为「其他」） */
-.dimension-item .dim-hint:not(:empty) {
-  font-size: 11.5px;
-  color: var(--warn-title);
-  line-height: 1.4;
-}
-
 /* 注意事项自动展示 */
 .notes-box {
   padding-top: 10px;

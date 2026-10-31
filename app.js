@@ -182,8 +182,7 @@ function renderDimensions() {
       (hasOptions ? '<button type="button" class="combo-toggle" tabindex="-1" aria-label="展开候选">▾</button>' : '') +
       '<div class="combo-list" hidden></div>' +
       '</div>';
-    item.innerHTML = '<label>' + escapeHtml(d.label) + autoTag + '</label>' + control +
-      '<div class="dim-hint" data-key="' + d.key + '"></div>';
+    item.innerHTML = '<label>' + escapeHtml(d.label) + autoTag + '</label>' + control;
     grid.appendChild(item);
   }
   refreshAllComboLists();
@@ -246,7 +245,6 @@ function bindDimensionEvents() {
       if (state.selection[key] === val) return;
       state.selection[key] = val;
       if (key === 'android_version') refreshCustomerOptions();
-      updateAndroidHint();
       updateMatchedItems();
     };
 
@@ -289,7 +287,7 @@ function bindDimensionEvents() {
   });
 }
 
-/** 刷新客户版本候选：随安卓版本联动，「其他」时汇总所有客户选项 */
+/** 刷新客户版本候选：随安卓版本联动，「通用」时汇总所有客户选项 */
 function refreshCustomerOptions() {
   const dim = ConfigManager.getDimension('customer');
   if (!dim) return;
@@ -303,23 +301,12 @@ function refreshCustomerOptions() {
   }
 }
 
-/** 安卓版本输入非 9/10/12 时提示按「其他」匹配 */
-function updateAndroidHint() {
-  const hint = $('.dim-hint[data-key="android_version"]');
-  if (!hint) return;
-  const raw = state.selection.android_version || '';
-  hint.textContent = (raw && raw !== '其他' && ConfigManager.effectiveAndroid(raw) === '其他')
-    ? '识别为「其他」：只检查不限制安卓版本的通用项'
-    : '';
-}
-
 /** 把 state.selection 同步到 UI 控件 */
 function syncDimensionUI() {
   refreshCustomerOptions();
   $$('.dim-input').forEach(inp => {
     inp.value = state.selection[inp.dataset.key] || '';
   });
-  updateAndroidHint();
 }
 
 /**
@@ -678,18 +665,24 @@ async function autoReadDimensions() {
     if (resp == null) continue;
 
     let value = null;
+    let shown = '';
     if (d.key === 'platform') {
       value = Serial.parseQgmr(resp, d.options || []);
     } else if (d.key === 'android_version') {
-      value = Serial.parseAndroidVersion(resp, d.options || []);
+      const raw = Serial.parseAndroidVersion(resp, d.options || []);
+      if (raw) {
+        // 非 9/10/12 的版本（更高版本、鸿蒙等）自动按「通用」处理
+        value = ConfigManager.effectiveAndroid(raw);
+        shown = value === raw ? raw : (raw + ' → ' + value);
+      }
     } else if (d.key === 'baseline') {
       value = Serial.parseCgmr(resp);
     }
     if (value) {
       state.selection[d.key] = value;
-      logLine('  解析到 ' + d.label + ': ' + value, 'ok');
+      logLine('  解析到 ' + d.label + ': ' + (shown || value), 'ok');
     } else {
-      logLine('  未能从 ' + cmd + ' 响应中解析 ' + d.label + '，请手动选择/填写', 'warn');
+      logLine('  未识别到 ' + d.label, 'warn');
     }
   }
   // 单软多硬：与 AT 指令一起自动检测（本地服务用 adb 读 /proc/cmdline 的 rfboard.id）
@@ -2102,8 +2095,27 @@ async function init() {
   updateRunButton();
   logLine('就绪。请点击"连接串口"（自动读取平台/安卓版本/基线）、选择客户版本、选择文件夹后点击"开始检查"。', 'info');
 
+  // 侧边栏显示工具实际版本号
+  loadLocalVersion();
   // 启动后静默检查更新
   checkForUpdate({ silent: true });
+}
+
+/** 侧边栏版本号：显示本机 version.json 里的实际版本 */
+async function loadLocalVersion() {
+  const el = $('#version-info');
+  if (!el) return;
+  try {
+    const resp = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data || !data.version) throw new Error('版本信息缺失');
+    el.textContent = data.version;
+    el.title = '工具版本 ' + data.version;
+  } catch (e) {
+    el.textContent = '版本未知';
+    el.title = '读取版本失败：' + e.message;
+  }
 }
 
 // ===== 更新检查 =====

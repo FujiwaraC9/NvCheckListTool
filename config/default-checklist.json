@@ -16,7 +16,7 @@
       "label": "安卓版本",
       "order": 2,
       "auto_read": { "command": "AT+QGMR" },
-      "options": ["9", "10", "12", "其他"]
+      "options": ["9", "10", "12", "通用"]
     },
     {
       "key": "customer",
