@@ -2110,8 +2110,8 @@ async function loadLocalVersion() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     if (!data || !data.version) throw new Error('版本信息缺失');
-    el.textContent = data.version;
-    el.title = '工具版本 ' + data.version;
+    el.textContent = fmtVer(data.version);
+    el.title = '工具版本 ' + fmtVer(data.version);
   } catch (e) {
     el.textContent = '版本未知';
     el.title = '读取版本失败：' + e.message;
@@ -2130,7 +2130,7 @@ async function checkForUpdate(opts) {
       return;
     }
     if (!data.hasUpdate) {
-      if (!silent) toast('当前已是最新版本（v' + data.localVersion + '）', 'info');
+      if (!silent) toast('当前已是最新版本（' + fmtVer(data.localVersion) + '）', 'info');
       return;
     }
     // 有更新，弹窗
@@ -2140,27 +2140,80 @@ async function checkForUpdate(opts) {
   }
 }
 
-function showUpdateDialog(data) {
-  const fileList = data.changedFiles.length
-    ? data.changedFiles.map(f => '<li>' + escapeHtml(f) + '</li>').join('')
-    : '<li>（无具体文件信息，将更新全部追踪文件）</li>';
-  const restartHint = data.needRestart
-    ? '<p class="config-hint" style="color:var(--warning,#f59e0b);margin:8px 0 0">本次更新包含 server.py / launch.bat，更新后需重启本地服务才完全生效。</p>'
+/** 版本号显示：version.json 里的版本号自带 v 前缀，这里统一成单个 v */
+function fmtVer(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '未知版本';
+  return /^v/i.test(s) ? s : 'v' + s;
+}
+
+/** 从 CHANGELOG.md 文本里截取指定版本那一段（返回该版本下的条目行） */
+function changelogSection(text, version) {
+  const ver = String(version || '').replace(/^v/i, '').trim();
+  if (!text || !ver) return '';
+  const out = [];
+  let hit = false;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(/^##\s+v?([0-9][0-9.]*)/);
+    if (m) {
+      if (hit) break;              // 已到下一条版本，结束
+      hit = m[1] === ver;
+      continue;
+    }
+    if (hit && line.trim()) out.push(line.trim());
+  }
+  return out.join('\n');
+}
+
+/** 拉取远端更新日志（GitHub raw，带时间戳防缓存）；失败返回空串，不影响更新流程 */
+async function fetchChangelog() {
+  const url = 'https://raw.githubusercontent.com/FujiwaraC9/NvCheckListTool/main/CHANGELOG.md';
+  try {
+    const resp = await fetch(url + '?_t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) return '';
+    return await resp.text();
+  } catch (e) {
+    return '';
+  }
+}
+
+async function showUpdateDialog(data) {
+  const files = data.changedFiles || [];
+  const filesHtml = files.length
+    ? '<div style="margin:0 0 8px"><div style="font-size:12px;color:var(--text-secondary,#6b7280);margin-bottom:4px">需要下载的文件（' + files.length + '）</div>' +
+      '<ul style="margin:0;padding-left:20px;font-size:13px;font-family:Consolas,monospace;max-height:150px;overflow:auto">' +
+      files.map(f => '<li>' + escapeHtml(f) + '</li>').join('') + '</ul></div>'
+    : '<p class="config-hint" style="margin:0 0 8px">本次没有文件变更，只需把版本号同步到 <b>' + escapeHtml(fmtVer(data.remoteVersion)) + '</b>。</p>';
+
+  const notes = changelogSection(await fetchChangelog(), data.remoteVersion);
+  const notesHtml = notes
+    ? '<div style="margin:0 0 8px;padding:8px 10px;border-left:3px solid var(--accent,#3b82f6);background:var(--bg-subtle,#f8fafc);border-radius:4px;max-height:220px;overflow:auto">' +
+      '<div style="font-size:12px;color:var(--text-secondary,#6b7280);margin-bottom:4px">更新日志</div>' +
+      notes.split('\n').map(l => '<div style="font-size:13px;line-height:1.6">' +
+        escapeHtml(l.replace(/^[-*]\s*/, '· ')) + '</div>').join('') +
+      '</div>'
     : '';
+
+  const restartHint = data.needRestart
+    ? '<p class="config-hint" style="color:var(--warning,#f59e0b);margin:8px 0 0">本次更新包含 server.py / 启动脚本，更新后需重启本地服务才完全生效。</p>'
+    : '';
+
   showModal({
     title: '发现新版本',
     icon: 'info',
     bodyHtml:
-      '<p style="margin:0 0 8px">远程版本 <b>v' + escapeHtml(data.remoteVersion) + '</b>（当前 v' + escapeHtml(data.localVersion) + '），以下文件有变更：</p>' +
-      '<ul style="margin:0 0 8px;padding-left:20px;font-size:13px;font-family:Consolas,monospace">' + fileList + '</ul>' +
-      restartHint +
-      '<p class="config-hint" style="margin:8px 0 0">点击「立即更新」将自动下载并替换上述文件。</p>',
+      '<p style="margin:0 0 8px">远程版本 <b>' + escapeHtml(fmtVer(data.remoteVersion)) +
+      '</b>（当前 ' + escapeHtml(fmtVer(data.localVersion)) + '）</p>' +
+      notesHtml + filesHtml + restartHint +
+      '<p class="config-hint" style="margin:8px 0 0">' +
+      (files.length ? '点击「立即更新」将自动下载并替换上述文件。' : '点击「立即更新」将同步版本号。') +
+      '</p>',
     buttons: [
       { text: '稍后再说', class: '', value: false },
       { text: '立即更新', class: 'btn-primary', value: true },
     ],
   }).then(confirmed => {
-    if (confirmed) return applyUpdate(data.changedFiles);
+    if (confirmed) return applyUpdate(files);
   });
 }
 
