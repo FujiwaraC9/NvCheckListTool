@@ -1,13 +1,13 @@
 {
-  "version": "v1.0.3",
+  "version": "v1.0.4",
   "files": {
-    "index.html": "1c693d2944c9d17252f37fc2ef111f4ce0fe6f23",
+    "index.html": "54ee152edc1a05b8739eb22bf0860f7f7d148b47",
     "app.js": "a0ba5c2e7fbfe5169637b9a49225deae74eeda6a",
     "styles.css": "718cdee82391aba07d4e53173d01e6252561638c",
     "server.py": "ed164247358d246cade5d255995e948a6eac4154",
     "启动启动通通启动.bat": "0262dd1f44677e489a2507f64a27fa5740135a02",
     "lib/db.js": "eecfeaf557bb4624e7f216e1133bcd6b02adaded",
-    "lib/serial.js": "a2bfdf738030821bb73ccca8556260c16416ece2",
+    "lib/serial.js": "d4cb03f2bfd7f7b77cbf937141a03f6161103ee4",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",
     "lib/config-manager.js": "5f1337380995caf742a213b6c1ff38cc66af85c8",
     "lib/excel-export.js": "dc5827a822c16f242036bd9625d64ae4adac400b",
