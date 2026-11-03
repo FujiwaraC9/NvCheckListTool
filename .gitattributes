@@ -1,0 +1,3 @@
+# Windows 批处理必须保持 CRLF：LF 行尾会让 cmd 找不到 goto 标签
+# （报错「The system cannot find the batch label specified」），启动脚本直接跑不起来。
+*.bat -text

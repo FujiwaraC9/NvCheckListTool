@@ -1,5 +1,8 @@
 # 更新日志
 
+## v1.0.7（2026-11-03）
+- 修复启动脚本「启动启动通通启动.bat」被换成 LF 行尾后双击打不开的问题（cmd 找不到 goto 标签，报「cannot find the batch label specified」）；仓库改为固定用 CRLF 保存并加 .gitattributes 锁定，避免行尾再被转换破坏
+
 ## v1.0.6（2026-10-31）
 - 单软多硬下拉框改为实时生效：选「是」FSG TAG 立刻切成 AT+QNVCONFIRM? 的 Tag，选「否」立刻还原成 AT+QFSGVERSION? 的 Tag，不用重新读取设备版本
 - FSG TAG 下方新增来源小字，标明当前 Tag 取自哪条 AT 指令

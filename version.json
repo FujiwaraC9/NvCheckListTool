@@ -1,11 +1,11 @@
 {
-  "version": "v1.0.6",
+  "version": "v1.0.7",
   "files": {
     "index.html": "8dc3447ec64df3aba8fff68348bf465e92ca02e2",
     "app.js": "b9542a19052da8328dfa2255fd187bb3af0c18d0",
     "styles.css": "5fe7ef5dd14cdd446b1cb35646878ac683d1fde8",
     "server.py": "ed164247358d246cade5d255995e948a6eac4154",
-    "启动启动通通启动.bat": "0262dd1f44677e489a2507f64a27fa5740135a02",
+    "启动启动通通启动.bat": "be4c520742857e7404c7ca57fc3f6e08d8a198e1",
     "lib/db.js": "eecfeaf557bb4624e7f216e1133bcd6b02adaded",
     "lib/serial.js": "943cf1751b404f5df1ae8db969b5117e25b6081b",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",
