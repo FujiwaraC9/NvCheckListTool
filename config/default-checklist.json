@@ -29,7 +29,7 @@
         "12": ["公版", "新大陆定制"]
       },
       "options_by_platform": {
-        "UIS7885": ["东集", "星云", "优博讯"]
+        "UIS7885": ["东集/星云/优博讯"]
       }
     },
     {
@@ -82,7 +82,7 @@
       "default": "0x0",
       "expect_rules": [
         {
-          "when": { "platform": ["UIS7885"], "customer": ["东集", "星云", "优博讯"] },
+          "when": { "platform": ["UIS7885"], "customer": ["东集/星云/优博讯"] },
           "expect": ["0x3", "0x303"]
         }
       ],

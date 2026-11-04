@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.9",
+  "version": "v1.0.10",
   "files": {
-    "index.html": "1d8f3b0611d3add84a7ce2753696d933c829517c",
+    "index.html": "5b63ba1c5da9bd9b435a38212d5b3b372effc0c1",
     "app.js": "ce4d5a204a99a8a80881d42f0fc65fad62a8b910",
     "styles.css": "5fe7ef5dd14cdd446b1cb35646878ac683d1fde8",
     "server.py": "58e31c175292885ecee5251afd10099aace809f9",
@@ -9,11 +9,11 @@
     "lib/db.js": "eecfeaf557bb4624e7f216e1133bcd6b02adaded",
     "lib/serial.js": "ea7e43c6154fd8eafcb80cc22342e0b144f19126",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",
-    "lib/config-manager.js": "14ddf0983995075681106916008f5881a236fc5c",
+    "lib/config-manager.js": "0d6dac490379de51fd792462a91116bb7dd5f87a",
     "lib/excel-export.js": "dc5827a822c16f242036bd9625d64ae4adac400b",
     "lib/svn-check.js": "16d11a70ebeebb38bb81239e6cbe0c93cc5dd9e7",
     "lib/exceljs.min.js": "a684fb1596d556e35254de69ef0c2c546cffa031",
-    "config/default-checklist.js": "4912e486c7ea3d724d52713216b6eec6a1cf59bf",
-    "config/default-checklist.json": "6b02ef91efdc772c2f3859e363c5dabdd54e5fe8"
+    "config/default-checklist.js": "78448dea8309b5e9639f29f716a4d7500b218596",
+    "config/default-checklist.json": "a245852f1ec9e0d7e9a921eda7c59b48a9519e9c"
   }
 }
