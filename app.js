@@ -244,7 +244,8 @@ function bindDimensionEvents() {
       const val = inp.value.trim();
       if (state.selection[key] === val) return;
       state.selection[key] = val;
-      if (key === 'android_version') refreshCustomerOptions();
+      // 客户候选随平台/安卓版本联动（东集/星云/优博讯 只在 UIS7885 才出现）
+      if (key === 'platform' || key === 'android_version') refreshCustomerOptions();
       // 单软多硬改了，SVN 页的 FSG TAG 来源跟着实时切换
       if (key === 'multi_hw') applyMultiHwToSvnTag(val);
       updateMatchedItems();

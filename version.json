@@ -1,19 +1,19 @@
 {
-  "version": "v1.0.8",
+  "version": "v1.0.9",
   "files": {
-    "index.html": "bd30914aaa06335e997c7ca9146e017580b9e81e",
-    "app.js": "c21e1a5d50795bd20d325301ce6bfdb87426c48e",
+    "index.html": "1d8f3b0611d3add84a7ce2753696d933c829517c",
+    "app.js": "ce4d5a204a99a8a80881d42f0fc65fad62a8b910",
     "styles.css": "5fe7ef5dd14cdd446b1cb35646878ac683d1fde8",
     "server.py": "58e31c175292885ecee5251afd10099aace809f9",
     "启动启动通通启动.bat": "be4c520742857e7404c7ca57fc3f6e08d8a198e1",
     "lib/db.js": "eecfeaf557bb4624e7f216e1133bcd6b02adaded",
     "lib/serial.js": "ea7e43c6154fd8eafcb80cc22342e0b144f19126",
     "lib/nvm-parser.js": "8261663062c926cefe994ab86116a6511ef153e4",
-    "lib/config-manager.js": "9c3e2a0b721dc783699e2dfc2fef0d9d9730cd4c",
+    "lib/config-manager.js": "14ddf0983995075681106916008f5881a236fc5c",
     "lib/excel-export.js": "dc5827a822c16f242036bd9625d64ae4adac400b",
     "lib/svn-check.js": "16d11a70ebeebb38bb81239e6cbe0c93cc5dd9e7",
     "lib/exceljs.min.js": "a684fb1596d556e35254de69ef0c2c546cffa031",
-    "config/default-checklist.js": "234030ae7a0ff7559a23ba988a7e9e3c1adbe36a",
-    "config/default-checklist.json": "710d22bfcc8a0e394488c6c70edff3e931649d28"
+    "config/default-checklist.js": "4912e486c7ea3d724d52713216b6eec6a1cf59bf",
+    "config/default-checklist.json": "6b02ef91efdc772c2f3859e363c5dabdd54e5fe8"
   }
 }
