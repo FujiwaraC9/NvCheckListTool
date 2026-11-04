@@ -4,7 +4,7 @@
  */
 window.DEFAULT_CHECKLIST = {
   version: 3,
-  updated_at: "2026-08-26",
+  updated_at: "2026-11-04",
   description: "NV Checklist 云端默认配置 v3 - 按 NvCheckList.md 需求文档重构",
 
   dimensions: [
@@ -30,7 +30,7 @@ window.DEFAULT_CHECKLIST = {
       options_by: {
         "9": ["公版"],
         "10": ["公版", "飞天"],
-        "12": ["公版", "新大陆定制"]
+        "12": ["公版", "新大陆定制", "东集", "星云", "优博讯"]
       }
     },
     {
@@ -81,12 +81,18 @@ window.DEFAULT_CHECKLIST = {
     {
       name: "sim_hot_plug_cfg",
       default: "0x0",
+      expect_rules: [
+        {
+          when: { platform: ["UIS7885"], customer: ["东集", "星云", "优博讯"] },
+          expect: ["0x3", "0x303"]
+        }
+      ],
       conditions: {},
       files: {
         fm: "ProductionParam.nvm",
         xml: "CustNV/SIM_HOT_PLUG_CFG.xml"
       },
-      note: "默认关闭，有特殊需求请提前确认"
+      note: "默认关闭，有特殊需求请提前确认；UIS7885 的东集/星云/优博讯 期望 0x3 或 0x303"
     },
     {
       name: "dsp_log_set",

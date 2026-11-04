@@ -641,6 +641,9 @@ async function autoReadDimensions() {
   const dims = ConfigManager.getDimensions();
   const ser = state.cfg.serial;
   const respCache = {}; // command -> respText
+  // 平台用的 AT 指令（默认 AT+QGMR），基线兜底时要复用它的响应
+  const platDim = dims.find(x => x.key === 'platform');
+  const qgmrCmd = (platDim && platDim.auto_read && platDim.auto_read.command) || 'AT+QGMR';
 
   for (const d of dims) {
     if (!d.auto_read || !d.auto_read.command) continue;
@@ -673,12 +676,22 @@ async function autoReadDimensions() {
     } else if (d.key === 'android_version') {
       const raw = Serial.parseAndroidVersion(resp, d.options || []);
       if (raw) {
-        // 非 9/10/12 的版本（更高版本、鸿蒙等）自动按「通用」处理
+        // 非 9/10/12 的版本（更高版本等）自动按「通用」处理
         value = ConfigManager.effectiveAndroid(raw);
         shown = value === raw ? raw : (raw + ' → ' + value);
+      } else {
+        // 响应里没有版本号（鸿蒙 QGMR 只写 OH 版本）→ 按「通用」处理，不当失败
+        const oh = Serial.parseOhVersion(resp);
+        value = '通用';
+        shown = oh ? ('通用（识别到系统版本 ' + oh + '）') : '通用（未识别到版本号）';
       }
     } else if (d.key === 'baseline') {
       value = Serial.parseCgmr(resp);
+      if (!value) {
+        // 鸿蒙等设备没有 BASE Version:，回退用 QGMR 的 Revision 整段
+        const rev = Serial.parseRevision(respCache[qgmrCmd]);
+        if (rev) { value = rev; shown = rev + '（来源：QGMR）'; }
+      }
     }
     if (value) {
       state.selection[d.key] = value;
@@ -760,19 +773,22 @@ const AT_NVCONFIRM = 'AT+QNVCONFIRM?';
  */
 async function detectMultiHw() {
   if (!ConfigManager.getDimension('multi_hw')) return null;
-  logLine('检测单软多硬（adb 读 rfboard.id）...', 'info');
+  logLine('检测单软多硬（adb / 鸿蒙 hdc 读 rfboard.id）...', 'info');
   try {
     const resp = await fetch('/api/device/rfboard?_t=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
+    const via = (data && data.tool === 'hdc') ? 'hdc' : 'adb';
     if (!data || !data.ok) {
-      logLine('  单软多硬检测失败：' + ((data && data.error) || '未知原因') + '，请手动选择', 'warn');
+      logLine('  单软多硬检测失败（' + via + '）：' + ((data && data.error) || '未知原因') + '，请手动选择', 'warn');
       return null;
     }
+    // 读到了 cmdline 但没有 rfboard.id 时，后端已按「非单软多硬」返回，照结果继续即可
     const val = data.multi_hw ? '是' : '否';
     state.selection.multi_hw = val;
-    logLine('  rfboard.id=' + (data.rfboard_id == null ? '未找到' : data.rfboard_id) +
-      ' → 单软多硬：' + val + '（可手动修改）', 'ok');
+    logLine('  ' + via + ' /proc/cmdline rfboard.id=' +
+      (data.rfboard_id == null ? '未找到' : data.rfboard_id) +
+      ' → ' + (val === '是' ? '单软多硬' : '非单软多硬') + '（可手动修改）', 'ok');
     return val;
   } catch (e) {
     logLine('  单软多硬检测失败：' + e.message + '，请手动选择', 'warn');
@@ -906,36 +922,39 @@ async function runCheck() {
     for (const item of activeItems) {
       const files = item.files || {};
       const fname = kind === 'fm' ? files.fm : files.xml;
+      // 期望值可能随选择变化（如 UIS7885 的东集/星云/优博讯 热插拔为 0x3 或 0x303）
+      const exps = ConfigManager.expectedValues(item, state.selection);
+      const expectText = exps.join(' 或 ');
       if (!fname) {
-        results[item.name] = { verdict: 'skip', raw: null, value: null, default: item.default, reason: (kind === 'fm' ? 'FM基线' : '4G/5G基线') + '不关注此检查项' };
+        results[item.name] = { verdict: 'skip', raw: null, value: null, expect: expectText, default: item.default, reason: (kind === 'fm' ? 'FM基线' : '4G/5G基线') + '不关注此检查项' };
         logLine('  ' + item.name + '  ' + (kind === 'fm' ? 'FM基线' : '4G/5G基线') + '不关注 -> 跳过', 'warn');
         continue;
       }
       const text = await NvmParser.readFileFromDir(state.dirHandle, fname);
       if (text == null) {
         missingFiles.add(fname);
-        results[item.name] = { verdict: 'fail', raw: null, value: null, default: item.default, reason: '文件缺失: ' + fname };
+        results[item.name] = { verdict: 'fail', raw: null, value: null, expect: expectText, default: item.default, reason: '文件缺失: ' + fname };
         logLine('  ' + item.name + '  文件 ' + fname + ' 缺失 -> fail', 'err');
         allPass = false;
         continue;
       }
       const raw = NvmParser.parseItemValue(fname, text, item.name);
       const val = NvmParser.normalizeValue(raw);
-      const def = NvmParser.normalizeValue(item.default);
+      const hit = val != null && exps.some(e => NvmParser.normalizeValue(e) === val);
       let verdict;
       if (val == null) {
         verdict = 'fail';
         logLine('  ' + item.name + '  在 ' + fname + ' 中未找到或无法解析 -> fail', 'err');
-      } else if (val === def) {
+      } else if (hit) {
         verdict = 'pass';
-        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + '  (' + fname + ') -> pass', 'ok');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  期望=' + expectText + '  (' + fname + ') -> pass', 'ok');
       } else {
         verdict = 'fail';
-        logLine('  ' + item.name + '  值=' + (raw || '') + '  默认=' + item.default + '  (' + fname + ') -> fail', 'err');
+        logLine('  ' + item.name + '  值=' + (raw || '') + '  期望=' + expectText + '  (' + fname + ') -> fail', 'err');
       }
       if (verdict === 'fail') allPass = false;
       hasChecked = true;
-      results[item.name] = { verdict, raw, value: val, default: item.default, file: fname };
+      results[item.name] = { verdict, raw, value: val, expect: expectText, default: item.default, file: fname };
     }
 
     if (missingFiles.size > 0) {
@@ -1005,7 +1024,7 @@ function showResultCard(rec, activeItems) {
     const tr = document.createElement('tr');
     tr.className = 'row-' + r.verdict;
 
-    const expect = escapeHtml(item.default);
+    const expect = escapeHtml(r.expect || item.default);
     let actual;
     let fileCell;
     if (r.verdict === 'skip') {
@@ -1196,6 +1215,20 @@ function formatConditions(cond) {
   return '<div class="cond-desc">' + parts.join('<br>') + '</div>';
 }
 
+/** 配置页只读展示 expect_rules（特例期望值），表单里不提供编辑 */
+function formatExpectRules(item) {
+  const rules = item.expect_rules || [];
+  if (!rules.length) return '';
+  const labelMap = {};
+  ConfigManager.getDimensions().forEach(d => { labelMap[d.key] = d.label; });
+  return rules.map(r => {
+    const when = Object.entries(r.when || {})
+      .map(([k, vals]) => (labelMap[k] || k) + '=[' + vals.join(', ') + ']').join(' 且 ');
+    const exp = Array.isArray(r.expect) ? r.expect.join(' 或 ') : r.expect;
+    return '<div class="cond-desc" style="color:var(--warn-title)">特例期望值：' + escapeHtml(when) + ' → ' + escapeHtml(String(exp)) + '</div>';
+  }).join('');
+}
+
 function renderItemsTable(cfg) {
   const tbody = $('#items-tbody');
   tbody.innerHTML = '';
@@ -1208,7 +1241,7 @@ function renderItemsTable(cfg) {
       '<td><input type="text" class="inp-item-def" value="' + escapeHtml(item.default) + '" style="font-family:Consolas,monospace"></td>' +
       '<td><input type="text" class="inp-item-fm" value="' + escapeHtml(files.fm || '') + '" placeholder="不关注可留空"></td>' +
       '<td><input type="text" class="inp-item-xml" value="' + escapeHtml(files.xml || '') + '" placeholder="不关注可留空"></td>' +
-      '<td>' + formatConditions(item.conditions) + '</td>' +
+      '<td>' + formatConditions(item.conditions) + formatExpectRules(item) + '</td>' +
       '<td><input type="text" class="inp-item-note" value="' + escapeHtml(item.note || '') + '" placeholder="无备注" style="font-size:12px"></td>' +
       '<td><button class="link-btn danger btn-remove-item">删除</button></td>';
     tbody.appendChild(tr);
@@ -1226,11 +1259,12 @@ function collectConfigFromForm() {
     const noteInput = tr.querySelector('.inp-item-note');
     const note = noteInput ? noteInput.value.trim() : '';
     if (!name) return;
-    // 保留原 item 的 conditions
+    // 保留原 item 的 conditions 与 expect_rules（表单里不编辑，保存时不能丢）
     const orig = (cfg.items || []).find(i => i.name === name);
     newItems.push({
       name,
       default: def,
+      expect_rules: orig ? orig.expect_rules : undefined,
       files: { fm: fm || null, xml: xml || null },
       conditions: orig ? orig.conditions : {},
       note: note || undefined,

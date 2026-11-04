@@ -42,8 +42,8 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PORT = 8765
 
-# ---- 单软多硬检测（adb 读 /proc/cmdline 的 rfboard.id）----
-# 按顺序尝试：部分设备 /proc/cmdline 免 root 即可读；带引号的那条兼容 adb 直接拼接参数的旧行为
+# ---- 单软多硬检测（读 /proc/cmdline 的 rfboard.id）----
+# Android 用 adb，鸿蒙用 hdc；su -c 放最后仅作兼容尝试
 ADB_CMDLINE_COMMANDS = [
     # eng/root 设备可免 root 直读
     ['adb', 'shell', 'cat', '/proc/cmdline'],
@@ -51,9 +51,73 @@ ADB_CMDLINE_COMMANDS = [
     ['adb', 'shell', 'su', '0', 'cat', '/proc/cmdline'],
     ['adb', 'shell', "su 0 sh -c 'cat /proc/cmdline'"],
     # 新式 su（toybox 的 -c 语法）
-    ['adb', 'shell', 'su', '-c', 'cat /proc/cmdline'],
+    ['adb', 'shell', 'su', '-c', 'cat', '/proc/cmdline'],
 ]
+
+HDC_CMDLINE_COMMANDS = [
+    ['hdc', 'shell', 'cat', '/proc/cmdline'],
+    ['hdc', 'shell', 'su', '0', 'cat', '/proc/cmdline'],
+]
+
 ADB_TIMEOUT = 15
+
+
+def _valid_cmdline(raw):
+    """判断输出是不是真正的 /proc/cmdline，而不是 adb/hdc 的报错文本。
+
+    注意：黑名单里不能放宽泛的 'error'，
+    cmdline 本身可能含 androidboot.vbmeta.invalidate_on_error。
+    """
+    t = (raw or '').strip()
+    if not t:
+        return False
+    low = t.lower()
+    bad = (
+        'failed', 'no devices', 'not found', '[empty]', 'connect server',
+        'unauthorized', 'daemon not running', 'permission denied',
+        'invalid uid/gid', 'need connect-key',
+    )
+    if any(x in low for x in bad):
+        return False
+    # cmdline 特征：含 rfboard.id=，或整体是 key=value 空格分隔
+    return 'rfboard.id=' in low or ('=' in t and ' ' in t)
+
+
+def _read_cmdline(tool, commands):
+    """依次尝试命令，返回 (cmdline, 错误信息, 实际工具, 工具是否存在)。
+
+    读到有效 cmdline 立即返回；全部失败时返回最后一次错误。
+    """
+    raw, err, tool_found = '', '', False
+    for cmd in commands:
+        try:
+            proc = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=ADB_TIMEOUT,
+            )
+        except FileNotFoundError:
+            continue
+        except subprocess.TimeoutExpired:
+            tool_found = True
+            err = '%s 命令超时' % tool
+            continue
+        except OSError as e:
+            tool_found = True
+            err = '%s 执行失败: %s' % (tool, e)
+            continue
+
+        tool_found = True
+        out = proc.stdout.decode('utf-8', 'replace').strip()
+        errout = proc.stderr.decode('utf-8', 'replace').strip()
+
+        if out and _valid_cmdline(out):
+            return out, '', tool, True
+        if out:
+            errout = out[:120]
+        err = errout.splitlines()[0][:200] if errout else err
+
+    return raw, err, tool, tool_found
+
 
 # ---- 更新机制 ----
 # GitHub 仓库地址（raw 文件直链基础）
@@ -191,61 +255,52 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 self.send_error(405, 'Method Not Allowed')
 
-    # ---- 单软多硬检测：adb 读 /proc/cmdline，解析 rfboard.id ----
+    # ---- 单软多硬检测：读 /proc/cmdline，解析 rfboard.id ----
     def handle_device_rfboard(self):
         """判断设备是否单软多硬项目。
 
         规则：rfboard.id 为 -1 或找不到（含无输出）→ 非单软多硬；非负值 → 单软多硬。
-        执行的命令是写死在白名单里的，不接受客户端传入任何参数。
+        Android 优先 adb，鸿蒙自动回退 hdc。命令写死在白名单里，不接受客户端传参。
         """
-        raw, err = '', ''
-        for args in ADB_CMDLINE_COMMANDS:
-            try:
-                proc = subprocess.run(
-                    args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=ADB_TIMEOUT,
-                )
-            except FileNotFoundError:
-                err = '本机没有 adb（未安装或不在 PATH 中）'
-                break
-            except subprocess.TimeoutExpired:
-                err = 'adb 命令超时'
-                continue
-            except OSError as e:
-                err = 'adb 执行失败: %s' % e
-                break
+        raw, err, tool = '', '', ''
+        notes = []
 
-            out = proc.stdout.decode('utf-8', 'replace').strip()
-            errout = proc.stderr.decode('utf-8', 'replace').strip()
-            if out:
-                raw = out
-            if 'rfboard.id' in out:
-                err = ''
+        for name, commands in (('adb', ADB_CMDLINE_COMMANDS),
+                               ('hdc', HDC_CMDLINE_COMMANDS)):
+            raw, e, t, found = _read_cmdline(name, commands)
+            if raw:
+                tool, err = t, ''
                 break
-            if not err and errout:
-                err = errout.splitlines()[0][:200]
+            if found:
+                notes.append('%s：%s' % (name, e or '未读到 /proc/cmdline'))
+            else:
+                notes.append('%s：命令不可用（未安装或不在 PATH 中）' % name)
 
         if not raw:
-            hint = '（读取 /proc/cmdline 需要 root，请确认设备 su 可用并已授权 adb）'
             self.send_json(200, {
-                'ok': False, 'multi_hw': None, 'rfboard_id': None, 'raw': '',
-                'error': (err + ' ' + hint) if err else ('未获取到 /proc/cmdline 内容 ' + hint),
+                'ok': False, 'multi_hw': None, 'rfboard_id': None,
+                'raw': '', 'tool': '', 'error': '；'.join(notes),
             })
             return
 
-        matches = re.findall(r'rfboard\.id=(-?[0-9a-zA-Z]+)', raw)
-        board_id, multi = None, False
+        matches = re.findall(r'rfboard\.id=(-?[0-9]+)', raw)
+        board_id = None
         if matches:
             try:
-                board_id = int(matches[-1], 0)
+                board_id = int(matches[-1], 10)   # 用十进制，避免 int('08', 0) 报错
             except ValueError:
                 board_id = None
-            if board_id is not None:
-                multi = board_id >= 0
+
+        multi = board_id is not None and board_id >= 0
         self.send_json(200, {
-            'ok': True, 'multi_hw': multi, 'rfboard_id': board_id,
+            'ok': True,
+            'multi_hw': multi,
+            'rfboard_id': board_id,
             'raw': raw[:4000],
+            'tool': tool,                          # 'adb' / 'hdc'，前端展示
             'error': '' if matches else '未找到 rfboard.id，按非单软多硬处理',
         })
+
 
     def handle_svn_proxy(self, parsed, method):
         # 二次兜底校验（理论上调用方已过滤）
